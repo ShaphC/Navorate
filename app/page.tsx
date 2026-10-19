@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   Bookmark,
@@ -12,6 +12,7 @@ import {
   Film,
   Home,
   Library,
+  Loader2,
   MoreHorizontal,
   PauseCircle,
   Play,
@@ -25,10 +26,16 @@ import {
 
 import QuickSearch from "@/components/QuickSearch";
 import MediaSearch from "@/components/MediaSearch";
+import AccountMenu from "@/components/AccountMenu";
 
-type MediaType = "movie" | "series" | "anime" | "manga";
+import {
+  posterUrl,
+  type MediaStatus,
+  type MediaType,
+  type SavedMedia,
+} from "@/lib/media";
 
-type MediaStatus = "watching" | "watch_later" | "completed" | "on_hold";
+import { getMyMedia, updateMedia } from "@/lib/media-store";
 
 type View =
   | "home"
@@ -38,143 +45,10 @@ type View =
   | "on_hold"
   | "search";
 
-type MediaItem = {
-  id: number;
-  title: string;
-  type: MediaType;
-  year: number;
-  poster: string;
-  description: string;
-  status: MediaStatus;
-  season?: number;
-  episode?: number;
-  totalEpisodes?: number;
-  chapter?: number;
-  totalChapters?: number;
-  duration?: number;
-  progress?: number;
-  notes?: string;
-};
+type Category = "all" | MediaType;
+type Sort = "recent" | "title" | "year";
 
-const image = (path: string) => `https://image.tmdb.org/t/p/w500${path}`;
-
-const initialMedia: MediaItem[] = [
-  {
-    id: 1,
-    title: "Mobile Suit Gundam 00",
-    type: "anime",
-    year: 2007,
-    poster: image("/8zWv5FQWjTnY4N6xJYB6u7RZ5mB.jpg"),
-    description:
-      "In a world divided by conflict, Celestial Being intervenes with powerful mobile suits.",
-    status: "watching",
-    season: 1,
-    episode: 12,
-    totalEpisodes: 25,
-  },
-  {
-    id: 2,
-    title: "Frieren: Beyond Journey's End",
-    type: "anime",
-    year: 2023,
-    poster: image("/dqZENchTd7lp5zht7BdlqM7RBhD.jpg"),
-    description:
-      "After the Demon King is defeated, Frieren reflects on the meaning of life and sets out on a new journey.",
-    status: "watching",
-    season: 1,
-    episode: 7,
-    totalEpisodes: 28,
-  },
-  {
-    id: 3,
-    title: "Breaking Bad",
-    type: "series",
-    year: 2008,
-    poster: image("/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg"),
-    description:
-      "A chemistry teacher turns to a dangerous new life after a devastating diagnosis.",
-    status: "watching",
-    season: 2,
-    episode: 4,
-    totalEpisodes: 13,
-  },
-  {
-    id: 4,
-    title: "The Apothecary Diaries",
-    type: "anime",
-    year: 2023,
-    poster: image("/e3z8dZ9v7H5y7rXf2f9xM3qM5pN.jpg"),
-    description:
-      "A clever young apothecary solves mysteries inside the imperial palace.",
-    status: "watching",
-    season: 1,
-    episode: 8,
-    totalEpisodes: 24,
-  },
-  {
-    id: 5,
-    title: "Dune",
-    type: "movie",
-    year: 2021,
-    poster: image("/d5NXSklXo0qyIYkgV94XAgMIckC.jpg"),
-    description:
-      "Paul Atreides travels to the most dangerous planet in the universe.",
-    status: "watching",
-    duration: 155,
-    progress: 60,
-  },
-  {
-    id: 6,
-    title: "Steins;Gate",
-    type: "anime",
-    year: 2011,
-    poster: image("/5Yc1d6p0Vf4FzRkX2B8sT7uP9wQ.jpg"),
-    description:
-      "An eccentric scientist discovers a way to send messages into the past.",
-    status: "watch_later",
-  },
-  {
-    id: 7,
-    title: "Attack on Titan",
-    type: "anime",
-    year: 2013,
-    poster: image("/hTP1DtLGFamjfu8WqjnuQdP1n4i.jpg"),
-    description:
-      "Humanity struggles to survive behind walls protecting it from giant Titans.",
-    status: "watch_later",
-  },
-  {
-    id: 8,
-    title: "Interstellar",
-    type: "movie",
-    year: 2014,
-    poster: image("/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"),
-    description:
-      "Explorers travel through a wormhole to find humanity a new home.",
-    status: "watch_later",
-  },
-  {
-    id: 9,
-    title: "Berserk",
-    type: "manga",
-    year: 1989,
-    poster: "https://placehold.co/400x600/241b30/e8d8ff?text=Berserk",
-    description:
-      "A dark fantasy story following the journey of a lone swordsman.",
-    status: "watching",
-    chapter: 32,
-    totalChapters: 100,
-  },
-  {
-    id: 10,
-    title: "The Matrix",
-    type: "movie",
-    year: 1999,
-    poster: image("/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg"),
-    description: "A hacker discovers the truth about the reality around him.",
-    status: "completed",
-  },
-];
+type MediaChanges = Parameters<typeof updateMedia>[1];
 
 const navItems: {
   id: View;
@@ -189,7 +63,10 @@ const navItems: {
   { id: "search", label: "Search", icon: Search },
 ];
 
-const categories = [
+const categories: {
+  id: Category;
+  label: string;
+}[] = [
   { id: "all", label: "All" },
   { id: "movie", label: "Movies" },
   { id: "series", label: "TV Series" },
@@ -197,63 +74,89 @@ const categories = [
   { id: "manga", label: "Manga" },
 ];
 
-function getProgress(item: MediaItem) {
-  if (item.status === "completed") return 100;
+const statuses: {
+  id: MediaStatus;
+  label: string;
+}[] = [
+  { id: "watching", label: "Watching" },
+  { id: "watch_later", label: "Watch Later" },
+  { id: "completed", label: "Completed" },
+  { id: "on_hold", label: "On Hold" },
+];
 
-  if (item.type === "movie") {
-    return item.progress ?? 0;
-  }
-
-  if (item.type === "manga") {
-    return item.totalChapters
-      ? Math.min(
-          100,
-          Math.round(((item.chapter ?? 0) / item.totalChapters) * 100),
-        )
-      : 0;
-  }
-
-  return item.totalEpisodes
-    ? Math.min(
-        100,
-        Math.round(((item.episode ?? 0) / item.totalEpisodes) * 100),
-      )
-    : 0;
+function getYear(item: SavedMedia) {
+  return item.release_date?.slice(0, 4) || "—";
 }
 
-function getProgressLabel(item: MediaItem) {
-  if (item.type === "movie") {
-    return item.status === "completed"
-      ? "Completed"
-      : `${item.progress ?? 0}% watched`;
+function isEpisodic(item: SavedMedia) {
+  return item.media_type === "anime" || item.media_type === "series";
+}
+
+function getProgress(item: SavedMedia) {
+  if (item.status === "completed") return 100;
+
+  if (item.media_type === "movie") {
+    // Duration is not stored in SavedMedia yet.
+    // Do not treat seconds as a percentage.
+    return 0;
   }
 
-  if (item.type === "manga") {
-    return `Chapter ${item.chapter ?? 0}`;
+  if (item.media_type === "manga") {
+    if (!item.total_chapters) return 0;
+
+    return Math.min(
+      100,
+      Math.round(((item.last_read_chapter ?? 0) / item.total_chapters) * 100),
+    );
   }
 
-  return `S${item.season ?? 1} · E${item.episode ?? 0}`;
+  if (!item.total_episodes) return 0;
+
+  return Math.min(
+    100,
+    Math.round(((item.last_watched_episode ?? 0) / item.total_episodes) * 100),
+  );
+}
+
+function getProgressLabel(item: SavedMedia) {
+  if (item.status === "completed") {
+    return "Completed";
+  }
+
+  if (item.media_type === "movie") {
+    const seconds = item.movie_progress_seconds ?? 0;
+    const minutes = Math.floor(seconds / 60);
+
+    return minutes > 0 ? `${minutes} min watched` : "Not started";
+  }
+
+  if (item.media_type === "manga") {
+    return `Chapter ${item.last_read_chapter ?? 0}`;
+  }
+
+  return `S${item.current_season ?? 1} · E${item.last_watched_episode ?? 0}`;
 }
 
 function MediaPoster({
   item,
   onClick,
 }: {
-  item: MediaItem;
+  item: SavedMedia;
   onClick: () => void;
 }) {
-  const [failed, setFailed] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+  const poster = posterUrl(item.poster_path);
   const progress = getProgress(item);
 
   return (
     <button type="button" className="media-card" onClick={onClick}>
       <div className="poster-container">
-        {!failed && item.poster ? (
+        {poster && !imageFailed ? (
           <img
-            src={item.poster}
+            src={poster}
             alt={item.title}
             loading="lazy"
-            onError={() => setFailed(true)}
+            onError={() => setImageFailed(true)}
           />
         ) : (
           <div className="poster-fallback">
@@ -262,7 +165,7 @@ function MediaPoster({
           </div>
         )}
 
-        <span className="poster-type">{item.type}</span>
+        <span className="poster-type">{item.media_type}</span>
       </div>
 
       <div className="media-card-info">
@@ -270,7 +173,7 @@ function MediaPoster({
 
         <div className="media-card-subtitle">{getProgressLabel(item)}</div>
 
-        {item.status === "watching" && (
+        {item.status === "watching" && item.media_type !== "movie" && (
           <div className="media-progress-row">
             <div className="progress-track">
               <div
@@ -278,7 +181,6 @@ function MediaPoster({
                 style={{ width: `${progress}%` }}
               />
             </div>
-
             <span>{progress}%</span>
           </div>
         )}
@@ -294,8 +196,8 @@ function MediaSection({
   onSeeAll,
 }: {
   title: string;
-  items: MediaItem[];
-  onSelect: (item: MediaItem) => void;
+  items: SavedMedia[];
+  onSelect: (item: SavedMedia) => void;
   onSeeAll: () => void;
 }) {
   if (!items.length) return null;
@@ -305,7 +207,7 @@ function MediaSection({
       <div className="section-heading">
         <h2>{title}</h2>
 
-        <button className="text-link" onClick={onSeeAll}>
+        <button type="button" className="text-link" onClick={onSeeAll}>
           See all <ChevronRight size={15} />
         </button>
       </div>
@@ -337,7 +239,7 @@ function StatusCard({
   onClick: () => void;
 }) {
   return (
-    <button className="status-card" onClick={onClick}>
+    <button type="button" className="status-card" onClick={onClick}>
       <div className={`status-icon ${color}`}>
         <Icon size={21} />
       </div>
@@ -354,53 +256,57 @@ function MediaDetails({
   item,
   onClose,
   onUpdate,
+  saving,
+  error,
 }: {
-  item: MediaItem;
+  item: SavedMedia;
   onClose: () => void;
-  onUpdate: (item: MediaItem) => void;
+  onUpdate: (id: string, changes: MediaChanges) => Promise<void>;
+  saving: boolean;
+  error: string;
 }) {
   const [tab, setTab] = useState<"overview" | "episodes" | "details" | "notes">(
     "overview",
   );
 
   const [note, setNote] = useState(item.notes ?? "");
+  const [movieMinutes, setMovieMinutes] = useState(
+    String(Math.floor((item.movie_progress_seconds ?? 0) / 60)),
+  );
 
+  const episodic = isEpisodic(item);
   const progress = getProgress(item);
+  const poster = posterUrl(item.poster_path);
 
-  const episodic = item.type === "anime" || item.type === "series";
+  useEffect(() => {
+    setNote(item.notes ?? "");
+  }, [item.id, item.notes]);
 
-  const updateStatus = (status: MediaStatus) => {
-    onUpdate({ ...item, status });
-  };
+  useEffect(() => {
+    setMovieMinutes(
+      String(Math.floor((item.movie_progress_seconds ?? 0) / 60)),
+    );
+  }, [item.id, item.movie_progress_seconds]);
+
+  const updateStatus = (status: MediaStatus) => onUpdate(item.id, { status });
 
   const advance = () => {
-    if (item.type === "manga") {
-      onUpdate({
-        ...item,
-        chapter: (item.chapter ?? 0) + 1,
+    if (item.media_type === "manga") {
+      return onUpdate(item.id, {
+        last_read_chapter: (item.last_read_chapter ?? 0) + 1,
         status: "watching",
-      });
-    } else if (episodic) {
-      onUpdate({
-        ...item,
-        episode: (item.episode ?? 0) + 1,
-        status: "watching",
-      });
-    } else {
-      onUpdate({
-        ...item,
-        status: "completed",
-        progress: 100,
       });
     }
-  };
 
-  const actionLabel =
-    item.type === "manga"
-      ? "Read next chapter"
-      : episodic
-        ? "Watched next episode"
-        : "Mark as completed";
+    if (episodic) {
+      return onUpdate(item.id, {
+        last_watched_episode: (item.last_watched_episode ?? 0) + 1,
+        status: "watching",
+      });
+    }
+
+    return updateStatus("completed");
+  };
 
   return (
     <div className="details-overlay" onClick={onClose}>
@@ -409,20 +315,28 @@ function MediaDetails({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="details-topbar">
-          <button className="icon-button" onClick={onClose} aria-label="Back">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Back"
+          >
             <ChevronLeft size={22} />
           </button>
 
           <div className="details-top-actions">
             <button
+              type="button"
               className="icon-button"
-              aria-label="Bookmark"
               onClick={() => updateStatus("watch_later")}
+              disabled={saving}
+              aria-label="Watch later"
             >
               <Bookmark size={18} />
             </button>
 
             <button
+              type="button"
               className="icon-button"
               onClick={onClose}
               aria-label="Close"
@@ -434,14 +348,8 @@ function MediaDetails({
 
         <div className="details-hero">
           <div className="details-poster">
-            {item.poster ? (
-              <img
-                src={item.poster}
-                alt={item.title}
-                onError={(event) => {
-                  event.currentTarget.style.display = "none";
-                }}
-              />
+            {poster ? (
+              <img src={poster} alt={item.title} />
             ) : (
               <div className="poster-fallback">
                 <Film size={28} />
@@ -452,25 +360,37 @@ function MediaDetails({
 
           <div className="details-hero-content">
             <div className="eyebrow">
-              {item.type} · {item.year}
+              {item.media_type} · {getYear(item)}
             </div>
 
             <h1>{item.title}</h1>
 
-            <p>{item.description}</p>
+            <p>{item.overview || "No description available."}</p>
 
             <div className="details-hero-actions">
-              <button className="primary-button" onClick={advance}>
-                <Play size={16} />
-                {actionLabel}
+              <button
+                type="button"
+                className="primary-button"
+                onClick={advance}
+                disabled={saving}
+              >
+                {saving ? <Loader2 size={16} /> : <Play size={16} />}
+
+                {item.media_type === "manga"
+                  ? "Read next chapter"
+                  : episodic
+                    ? "Watched next episode"
+                    : "Mark as completed"}
               </button>
 
               <button
+                type="button"
                 className="secondary-button"
                 onClick={() => updateStatus("watch_later")}
+                disabled={saving}
               >
                 <Bookmark size={16} />
-                {item.type === "manga" ? "Read later" : "Watch later"}
+                {item.media_type === "manga" ? "Read later" : "Watch later"}
               </button>
             </div>
           </div>
@@ -480,84 +400,110 @@ function MediaDetails({
           {(
             [
               "overview",
-              ...(episodic || item.type === "manga" ? ["episodes"] : []),
+              ...(episodic || item.media_type === "manga" ? ["episodes"] : []),
               "details",
               "notes",
-            ] as string[]
+            ] as const
           ).map((value) => (
             <button
+              type="button"
               key={value}
               className={tab === value ? "active" : ""}
-              onClick={() => setTab(value as typeof tab)}
+              onClick={() => setTab(value)}
             >
-              {value === "episodes" && item.type === "manga"
+              {value === "episodes" && item.media_type === "manga"
                 ? "Chapters"
                 : value}
             </button>
           ))}
         </div>
 
+        {error && (
+          <p
+            role="alert"
+            className="muted-text"
+            style={{ color: "#ff9b9b", padding: "12px 20px" }}
+          >
+            {error}
+          </p>
+        )}
+
         {tab === "overview" && (
           <div className="details-body">
             <div className="progress-panel">
               <div className="progress-panel-header">
                 <strong>Progress</strong>
-                <span>{progress}%</span>
+                {item.media_type !== "movie" && <span>{progress}%</span>}
               </div>
 
               <div className="progress-description">
                 {getProgressLabel(item)}
               </div>
 
-              <div className="progress-track large">
-                <div
-                  className="progress-fill"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
+              {item.media_type !== "movie" && (
+                <div className="progress-track large">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              )}
+
+              {item.media_type === "movie" && (
+                <div className="chapter-controls">
+                  <label htmlFor="movie-minutes">Minutes watched</label>
+
+                  <input
+                    id="movie-minutes"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={movieMinutes}
+                    onChange={(event) => setMovieMinutes(event.target.value)}
+                  />
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() =>
+                      onUpdate(item.id, {
+                        movie_progress_seconds:
+                          Math.max(0, Math.floor(Number(movieMinutes) || 0)) *
+                          60,
+                        status: "watching",
+                      })
+                    }
+                  >
+                    Save progress
+                  </button>
+                </div>
+              )}
 
               <div className="progress-info-grid">
                 <div>
-                  <span>Last completed</span>
+                  <span>Current progress</span>
                   <strong>{getProgressLabel(item)}</strong>
                 </div>
 
                 <div>
-                  <span>Up next</span>
-                  <strong>
-                    {item.type === "manga"
-                      ? `Chapter ${(item.chapter ?? 0) + 1}`
-                      : episodic
-                        ? `Episode ${(item.episode ?? 0) + 1}`
-                        : "Continue watching"}
-                  </strong>
+                  <span>Status</span>
+                  <strong>{item.status.replace("_", " ")}</strong>
                 </div>
               </div>
             </div>
 
             <div className="status-actions">
-              {(
-                [
-                  ["watching", "Watching"],
-                  ["watch_later", "Watch Later"],
-                  ["completed", "Completed"],
-                  ["on_hold", "On Hold"],
-                ] as [MediaStatus, string][]
-              ).map(([value, label]) => (
+              {statuses.map(({ id, label }) => (
                 <button
-                  key={value}
-                  className={item.status === value ? "selected" : ""}
-                  onClick={() => updateStatus(value)}
+                  type="button"
+                  key={id}
+                  disabled={saving}
+                  className={item.status === id ? "selected" : ""}
+                  onClick={() => updateStatus(id)}
                 >
-                  {value === "watching" && <Play size={14} />}
-
-                  {value === "watch_later" && <Bookmark size={14} />}
-
-                  {value === "completed" && <Check size={14} />}
-
-                  {value === "on_hold" && <PauseCircle size={14} />}
-
-                  {item.type === "manga" && value === "watching"
+                  {item.status === id && <Check size={14} />}
+                  {id === "watching" && item.media_type === "manga"
                     ? "Reading"
                     : label}
                 </button>
@@ -574,19 +520,10 @@ function MediaDetails({
                   </div>
 
                   <div>
-                    <strong>Season {item.season ?? 1}</strong>
-                    <span>{item.totalEpisodes ?? "—"} episodes</span>
-                  </div>
-
-                  <div className="season-progress">
-                    <div className="progress-track">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-
-                    <small>{progress}%</small>
+                    <strong>Season {item.current_season ?? 1}</strong>
+                    <span>
+                      {item.total_episodes ?? "Unknown"} total episodes
+                    </span>
                   </div>
                 </div>
               </div>
@@ -598,72 +535,121 @@ function MediaDetails({
           <div className="details-body">
             <div className="episode-heading">
               <h3>
-                {item.type === "manga"
+                {item.media_type === "manga"
                   ? "Chapter progress"
-                  : `Season ${item.season ?? 1}`}
+                  : `Season ${item.current_season ?? 1}`}
               </h3>
             </div>
 
-            {item.type === "manga" ? (
+            {item.media_type === "manga" ? (
               <div className="chapter-controls">
                 <p>Current chapter</p>
 
-                <div className="chapter-number">{item.chapter ?? 0}</div>
+                <div className="chapter-number">
+                  {item.last_read_chapter ?? 0}
+                </div>
 
                 <div className="chapter-buttons">
                   <button
+                    type="button"
                     className="secondary-button"
+                    disabled={saving}
                     onClick={() =>
-                      onUpdate({
-                        ...item,
-                        chapter: Math.max(0, (item.chapter ?? 0) - 1),
+                      onUpdate(item.id, {
+                        last_read_chapter: Math.max(
+                          0,
+                          (item.last_read_chapter ?? 0) - 1,
+                        ),
                       })
                     }
                   >
                     Previous
                   </button>
 
-                  <button className="primary-button" onClick={advance}>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={saving}
+                    onClick={advance}
+                  >
                     <Plus size={16} />
                     Next chapter
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="episode-list">
-                {Array.from(
-                  {
-                    length: Math.min(item.totalEpisodes ?? 12, 50),
-                  },
-                  (_, index) => index + 1,
-                ).map((episode) => {
-                  const watched = episode <= (item.episode ?? 0);
+              <>
+                <div className="chapter-buttons">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() =>
+                      onUpdate(item.id, {
+                        current_season: Math.max(
+                          1,
+                          (item.current_season ?? 1) - 1,
+                        ),
+                        last_watched_episode: 0,
+                      })
+                    }
+                  >
+                    Previous season
+                  </button>
 
-                  return (
-                    <button
-                      key={episode}
-                      className="episode-row"
-                      onClick={() =>
-                        onUpdate({
-                          ...item,
-                          episode,
-                          status: "watching",
-                        })
-                      }
-                    >
-                      <span className="episode-number">{episode}</span>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() =>
+                      onUpdate(item.id, {
+                        current_season: (item.current_season ?? 1) + 1,
+                        last_watched_episode: 0,
+                      })
+                    }
+                  >
+                    Next season
+                  </button>
+                </div>
 
-                      <span className="episode-title">Episode {episode}</span>
+                <div className="episode-list">
+                  {Array.from(
+                    {
+                      length: Math.min(item.total_episodes ?? 12, 50),
+                    },
+                    (_, index) => index + 1,
+                  ).map((episode) => {
+                    const watched = episode <= (item.last_watched_episode ?? 0);
 
-                      <span
-                        className={`episode-check ${watched ? "checked" : ""}`}
+                    return (
+                      <button
+                        type="button"
+                        key={episode}
+                        className="episode-row"
+                        disabled={saving}
+                        onClick={() =>
+                          onUpdate(item.id, {
+                            last_watched_episode: episode,
+                            status: "watching",
+                          })
+                        }
                       >
-                        {watched && <Check size={13} />}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <span className="episode-number">{episode}</span>
+
+                        <span className="episode-title">Episode {episode}</span>
+
+                        <span
+                          className={`episode-check ${
+                            watched ? "checked" : ""
+                          }`}
+                        >
+                          {watched && <Check size={13} />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -678,17 +664,22 @@ function MediaDetails({
 
               <div>
                 <span>Type</span>
-                <strong>{item.type}</strong>
+                <strong>{item.media_type}</strong>
               </div>
 
               <div>
                 <span>Release year</span>
-                <strong>{item.year}</strong>
+                <strong>{getYear(item)}</strong>
               </div>
 
               <div>
                 <span>Status</span>
                 <strong>{item.status.replace("_", " ")}</strong>
+              </div>
+
+              <div>
+                <span>Source</span>
+                <strong>{item.source}</strong>
               </div>
             </div>
           </div>
@@ -706,20 +697,16 @@ function MediaDetails({
             />
 
             <button
+              type="button"
               className="primary-button"
-              onClick={() =>
-                onUpdate({
-                  ...item,
-                  notes: note,
-                })
-              }
+              disabled={saving}
+              onClick={() => onUpdate(item.id, { notes: note })}
             >
-              Save notes
+              {saving ? "Saving..." : "Save notes"}
             </button>
 
             <p className="muted-text">
-              Notes are currently saved in local app state. Supabase persistence
-              comes next.
+              Notes are saved to your Supabase account.
             </p>
           </div>
         )}
@@ -729,44 +716,58 @@ function MediaDetails({
 }
 
 export default function HomePage() {
-  const [media, setMedia] = useState(initialMedia);
-
+  const [media, setMedia] = useState<SavedMedia[]>([]);
   const [view, setView] = useState<View>("home");
-
   const [searchQuery, setSearchQuery] = useState("");
-
-  const [category, setCategory] = useState("all");
-
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-
+  const [category, setCategory] = useState<Category>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-
-  const [sort, setSort] = useState("recent");
-
+  const [sort, setSort] = useState<Sort>("recent");
   const [greeting, setGreeting] = useState("Welcome back!");
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const refreshMedia = useCallback(async () => {
+    setLoadError("");
+
+    try {
+      const items = await getMyMedia();
+      setMedia(items);
+    } catch (error) {
+      console.error("Failed to load media:", error);
+
+      setLoadError(
+        error instanceof Error ? error.message : "Unable to load your library.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const hour = new Date().getHours();
 
-    if (hour < 12) {
-      setGreeting("Good morning!");
-    } else if (hour < 18) {
-      setGreeting("Good afternoon!");
-    } else {
-      setGreeting("Good evening!");
-    }
-  }, []);
+    setGreeting(
+      hour < 12
+        ? "Good morning!"
+        : hour < 18
+          ? "Good afternoon!"
+          : "Good evening!",
+    );
+
+    void refreshMedia();
+  }, [refreshMedia]);
 
   const selectedItem = media.find((item) => item.id === selectedId) ?? null;
 
   const counts = useMemo(
     () => ({
       watching: media.filter((item) => item.status === "watching").length,
-
       watch_later: media.filter((item) => item.status === "watch_later").length,
-
       completed: media.filter((item) => item.status === "completed").length,
-
       on_hold: media.filter((item) => item.status === "on_hold").length,
     }),
     [media],
@@ -780,37 +781,50 @@ export default function HomePage() {
     }
 
     if (category !== "all") {
-      results = results.filter((item) => item.type === category);
+      results = results.filter((item) => item.media_type === category);
     }
 
     if (sort === "title") {
       results.sort((a, b) => a.title.localeCompare(b.title));
-    }
-
-    if (sort === "year") {
-      results.sort((a, b) => b.year - a.year);
+    } else if (sort === "year") {
+      results.sort((a, b) =>
+        (b.release_date ?? "").localeCompare(a.release_date ?? ""),
+      );
+    } else {
+      results.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     }
 
     return results;
   }, [media, view, category, sort]);
 
-  const updateItem = (updated: MediaItem) => {
-    setMedia((previous) =>
-      previous.map((item) => (item.id === updated.id ? updated : item)),
-    );
-  };
+  async function handleUpdate(id: string, changes: MediaChanges) {
+    if (saving) return;
 
-  const navigate = (nextView: View) => {
+    setSaving(true);
+    setSaveError("");
+
+    try {
+      const updated = await updateMedia(id, changes);
+
+      setMedia((previous) =>
+        previous.map((item) => (item.id === id ? updated : item)),
+      );
+    } catch (error) {
+      console.error("Failed to update media:", error);
+
+      setSaveError(
+        error instanceof Error ? error.message : "Unable to save changes.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function navigate(nextView: View) {
     setView(nextView);
     setCategory("all");
     setShowFilters(false);
-  };
-
-  const openFullSearch = () => {
-    setView("search");
-    setCategory("all");
-    setShowFilters(false);
-  };
+  }
 
   const pageTitle: Record<View, string> = {
     home: greeting,
@@ -823,20 +837,18 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
-      {/* SIDEBAR */}
-
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">
             <Film size={25} />
           </div>
-
           <span>MyMedia</span>
         </div>
 
         <nav className="sidebar-nav">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button
+              type="button"
               key={id}
               className={`nav-item ${view === id ? "active" : ""}`}
               onClick={() => navigate(id)}
@@ -848,14 +860,16 @@ export default function HomePage() {
         </nav>
 
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => navigate("library")}>
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => navigate("library")}
+          >
             <Settings size={19} />
             <span>Settings</span>
           </button>
         </div>
       </aside>
-
-      {/* MAIN CONTENT */}
 
       <main className="main-content">
         <header className="topbar">
@@ -872,31 +886,47 @@ export default function HomePage() {
           </div>
 
           <div className="topbar-actions">
-            {/* Desktop quick search.
-                Hidden on full Search page. */}
-
             {view !== "search" && (
               <QuickSearch
                 query={searchQuery}
                 onQueryChange={setSearchQuery}
-                onViewAll={openFullSearch}
+                onViewAll={() => navigate("search")}
               />
             )}
 
-            <button
-              type="button"
-              className="avatar"
-              title="Personal library"
-              onClick={() => navigate("library")}
-            >
-              M
-            </button>
+            <AccountMenu />
           </div>
         </header>
 
-        {/* DASHBOARD */}
+        {view === "search" ? (
+          <MediaSearch
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            onAdded={refreshMedia}
+          />
+        ) : loading ? (
+          <div className="empty-state">
+            <Loader2 size={30} className="quick-search-spinner" />
+            <h3>Loading your library...</h3>
+          </div>
+        ) : loadError ? (
+          <div className="empty-state">
+            <Film size={36} />
+            <h3>Unable to load your library</h3>
+            <p>{loadError}</p>
 
-        {view === "home" && (
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setLoading(true);
+                void refreshMedia();
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        ) : view === "home" ? (
           <>
             <div className="status-grid">
               <StatusCard
@@ -932,49 +962,53 @@ export default function HomePage() {
               />
             </div>
 
-            <MediaSection
-              title="Continue Watching & Reading"
-              items={media.filter((item) => item.status === "watching")}
-              onSelect={(item) => setSelectedId(item.id)}
-              onSeeAll={() => navigate("library")}
-            />
+            {media.length === 0 ? (
+              <div className="empty-state">
+                <Film size={36} />
+                <h3>Your library is empty</h3>
+                <p>Find your first movie, TV series, anime, or manga.</p>
 
-            <MediaSection
-              title="Watch Later"
-              items={media.filter((item) => item.status === "watch_later")}
-              onSelect={(item) => setSelectedId(item.id)}
-              onSeeAll={() => navigate("watch_later")}
-            />
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => navigate("search")}
+                >
+                  <Plus size={16} />
+                  Add your first title
+                </button>
+              </div>
+            ) : (
+              <>
+                <MediaSection
+                  title="Continue Watching & Reading"
+                  items={media.filter((item) => item.status === "watching")}
+                  onSelect={(item) => setSelectedId(item.id)}
+                  onSeeAll={() => navigate("library")}
+                />
 
-            <MediaSection
-              title="Recently Completed"
-              items={media.filter((item) => item.status === "completed")}
-              onSelect={(item) => setSelectedId(item.id)}
-              onSeeAll={() => navigate("completed")}
-            />
+                <MediaSection
+                  title="Watch Later"
+                  items={media.filter((item) => item.status === "watch_later")}
+                  onSelect={(item) => setSelectedId(item.id)}
+                  onSeeAll={() => navigate("watch_later")}
+                />
+
+                <MediaSection
+                  title="Recently Completed"
+                  items={media.filter((item) => item.status === "completed")}
+                  onSelect={(item) => setSelectedId(item.id)}
+                  onSeeAll={() => navigate("completed")}
+                />
+              </>
+            )}
           </>
-        )}
-
-        {/* FULL SEARCH */}
-
-        {view === "search" && (
-          <MediaSearch
-            query={searchQuery}
-            onQueryChange={setSearchQuery}
-            onAdded={() => {
-              // Later, refresh the user's Supabase-backed library here.
-            }}
-          />
-        )}
-
-        {/* PERSONAL LIBRARY */}
-
-        {view !== "home" && view !== "search" && (
+        ) : (
           <div className="library-page">
             <div className="library-toolbar">
               <div className="category-tabs">
                 {categories.map((item) => (
                   <button
+                    type="button"
                     key={item.id}
                     className={category === item.id ? "active" : ""}
                     onClick={() => setCategory(item.id)}
@@ -985,6 +1019,7 @@ export default function HomePage() {
               </div>
 
               <button
+                type="button"
                 className="filter-button"
                 onClick={() => setShowFilters(true)}
               >
@@ -995,7 +1030,7 @@ export default function HomePage() {
 
             <div className="library-count">{filteredMedia.length} titles</div>
 
-            {filteredMedia.length ? (
+            {filteredMedia.length > 0 ? (
               <div className="library-grid">
                 {filteredMedia.map((item) => (
                   <MediaPoster
@@ -1009,22 +1044,30 @@ export default function HomePage() {
               <div className="empty-state">
                 <Film size={36} />
                 <h3>No titles found</h3>
-                <p>Try changing your filters.</p>
+                <p>
+                  {media.length === 0
+                    ? "Your library is empty."
+                    : "Try another category or status."}
+                </p>
+
+                {media.length === 0 && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => navigate("search")}
+                  >
+                    Find media
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
       </main>
 
-      {/* MOBILE NAVIGATION */}
-
       <nav className="mobile-bottom-nav">
         {[
-          {
-            id: "home" as View,
-            icon: Home,
-            label: "Home",
-          },
+          { id: "home" as View, icon: Home, label: "Home" },
           {
             id: "library" as View,
             icon: Library,
@@ -1037,6 +1080,7 @@ export default function HomePage() {
           },
         ].map(({ id, icon: Icon, label }) => (
           <button
+            type="button"
             key={id}
             className={view === id ? "active" : ""}
             onClick={() => navigate(id)}
@@ -1047,6 +1091,7 @@ export default function HomePage() {
         ))}
 
         <button
+          type="button"
           className={showFilters ? "active" : ""}
           onClick={() => setShowFilters(true)}
         >
@@ -1055,18 +1100,16 @@ export default function HomePage() {
         </button>
       </nav>
 
-      {/* MEDIA DETAILS */}
-
       {selectedItem && (
         <MediaDetails
           key={selectedItem.id}
           item={selectedItem}
           onClose={() => setSelectedId(null)}
-          onUpdate={updateItem}
+          onUpdate={handleUpdate}
+          saving={saving}
+          error={saveError}
         />
       )}
-
-      {/* FILTERS */}
 
       {showFilters && (
         <div className="filter-overlay" onClick={() => setShowFilters(false)}>
@@ -1078,6 +1121,7 @@ export default function HomePage() {
               <h2>Filter & Sort</h2>
 
               <button
+                type="button"
                 className="icon-button"
                 onClick={() => setShowFilters(false)}
               >
@@ -1090,6 +1134,7 @@ export default function HomePage() {
             <div className="filter-options">
               {categories.map((item) => (
                 <button
+                  type="button"
                   key={item.id}
                   className={category === item.id ? "active" : ""}
                   onClick={() => setCategory(item.id)}
@@ -1102,12 +1147,15 @@ export default function HomePage() {
             <h3>Sort By</h3>
 
             <div className="filter-options">
-              {[
-                ["recent", "Recently Added"],
-                ["title", "Title (A-Z)"],
-                ["year", "Release Date"],
-              ].map(([value, label]) => (
+              {(
+                [
+                  ["recent", "Recently Updated"],
+                  ["title", "Title (A-Z)"],
+                  ["year", "Release Date"],
+                ] as [Sort, string][]
+              ).map(([value, label]) => (
                 <button
+                  type="button"
                   key={value}
                   className={sort === value ? "active" : ""}
                   onClick={() => setSort(value)}
@@ -1118,6 +1166,7 @@ export default function HomePage() {
             </div>
 
             <button
+              type="button"
               className="primary-button apply-filters"
               onClick={() => {
                 if (view === "home" || view === "search") {
