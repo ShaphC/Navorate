@@ -35,7 +35,7 @@ export async function addMedia(item: SearchItem, status: MediaStatus = "watch_la
 export type MediaChanges = Partial<Pick<SavedMedia,
   | "status" | "current_season" | "last_watched_episode"
   | "total_episodes" | "current_volume" | "last_read_chapter"
-  | "total_chapters" | "movie_progress_seconds" | "runtime_minutes" | "notes"
+  | "total_chapters" | "total_volumes" | "movie_progress_seconds" | "runtime_minutes" | "notes"
 >>;
 
 export async function updateMedia(id: string, changes: MediaChanges): Promise<SavedMedia> {

@@ -36,7 +36,7 @@ import {
 } from "@/lib/media";
 
 import { getMyMedia, updateMedia } from "@/lib/media-store";
-import { getWatchedEpisodes, setEpisodeWatched, type WatchedEpisode } from "@/lib/episode-store";
+import { getWatchedEpisodes, setEpisodeWatched, setSeasonWatched, type WatchedEpisode } from "@/lib/episode-store";
 
 type View =
   | "home"
@@ -277,6 +277,7 @@ function MediaDetails({
   error,
   watchedEpisodes,
   onToggleEpisode,
+  onToggleSeason,
 }: {
   item: SavedMedia;
   onClose: () => void;
@@ -285,6 +286,7 @@ function MediaDetails({
   error: string;
   watchedEpisodes: WatchedEpisode[];
   onToggleEpisode: (season: number, episode: number, watched: boolean) => Promise<void>;
+  onToggleSeason: (season: number, episodes: number[], watched: boolean) => Promise<void>;
 }) {
   const [tab, setTab] = useState<"overview" | "episodes" | "details" | "notes">(
     "overview",
@@ -301,6 +303,13 @@ function MediaDetails({
   const [seasonNumber, setSeasonNumber] = useState(item.current_season ?? 1);
   const [chapterInput, setChapterInput] = useState(String(item.last_read_chapter ?? 0));
   const [volumeInput, setVolumeInput] = useState(String(item.current_volume ?? 0));
+  const [chapterTotalInput, setChapterTotalInput] = useState(String(item.total_chapters ?? ""));
+  const [volumeTotalInput, setVolumeTotalInput] = useState(String(item.total_volumes ?? ""));
+
+  useEffect(() => {
+    setChapterTotalInput(String(item.total_chapters ?? ""));
+    setVolumeTotalInput(String(item.total_volumes ?? ""));
+  }, [item.total_chapters, item.total_volumes]);
 
   useEffect(() => {
     setChapterInput(String(item.last_read_chapter ?? 0));
@@ -331,7 +340,8 @@ function MediaDetails({
           setProvider(details);
           const changes: MediaChanges = {};
           if (item.media_type === "movie" && details.runtime_minutes != null && details.runtime_minutes !== item.runtime_minutes) changes.runtime_minutes = details.runtime_minutes;
-          if (item.media_type === "manga" && details.chapters != null && details.chapters !== item.total_chapters) changes.total_chapters = details.chapters;
+          if (item.media_type === "manga" && details.chapters != null && item.total_chapters == null) changes.total_chapters = details.chapters;
+          if (item.media_type === "manga" && details.volumes != null && item.total_volumes == null) changes.total_volumes = details.volumes;
           if (isEpisodic(item) && details.total_episodes != null && details.total_episodes !== item.total_episodes) changes.total_episodes = details.total_episodes;
           if (Object.keys(changes).length) void onUpdate(item.id, changes);
         }
@@ -628,10 +638,22 @@ function MediaDetails({
                 {providerError && <p role="status" className="muted-text">{providerError}</p>}
                 {provider && (
                   <p className="muted-text">
-                    Total: {provider.chapters ?? "Unknown"} chapters · {provider.volumes ?? "Unknown"} volumes
+                    Total: {item.total_chapters ?? provider.chapters ?? "Unknown"} chapters · {item.total_volumes ?? provider.volumes ?? "Unknown"} volumes
                     {provider.publication_status ? ` · ${provider.publication_status.replaceAll("_", " ")}` : ""}
                   </p>
                 )}
+                <p className="muted-text">If AniList has no totals, enter them yourself. Saved totals are used for progress percentages.</p>
+                <label htmlFor="manga-total-chapters">Total chapters (optional)</label>
+                <input id="manga-total-chapters" type="number" min="0" step="1" placeholder="Unknown"
+                  value={chapterTotalInput} onChange={(event) => setChapterTotalInput(event.target.value)} />
+                <label htmlFor="manga-total-volumes">Total volumes (optional)</label>
+                <input id="manga-total-volumes" type="number" min="0" step="1" placeholder="Unknown"
+                  value={volumeTotalInput} onChange={(event) => setVolumeTotalInput(event.target.value)} />
+                <button type="button" className="secondary-button" disabled={saving}
+                  onClick={() => onUpdate(item.id, {
+                    total_chapters: chapterTotalInput.trim() === "" ? null : Math.max(0, Math.floor(Number(chapterTotalInput) || 0)),
+                    total_volumes: volumeTotalInput.trim() === "" ? null : Math.max(0, Math.floor(Number(volumeTotalInput) || 0)),
+                  })}>Save manga totals</button>
                 <label htmlFor="manga-chapter">Current chapter</label>
                 <input id="manga-chapter" type="number" min="0" step="1" value={chapterInput}
                   onChange={(event) => setChapterInput(event.target.value)} />
@@ -676,6 +698,18 @@ function MediaDetails({
                 {providerLoading && <p className="muted-text">Loading episodes...</p>}
                 {providerError && <p role="status" className="muted-text">{providerError}</p>}
                 {provider?.episodes?.length === 0 && <p className="muted-text">No episodes listed for this season.</p>}
+                {provider?.episodes && provider.episodes.length > 0 && (
+                  <div className="chapter-buttons" style={{ marginBottom: 16 }}>
+                    <button type="button" className="primary-button" disabled={saving || providerLoading}
+                      onClick={() => onToggleSeason(seasonNumber, provider.episodes!.map((episode) => episode.episode_number), true)}>
+                      <Check size={16} /> Mark season watched
+                    </button>
+                    <button type="button" className="secondary-button" disabled={saving || providerLoading}
+                      onClick={() => onToggleSeason(seasonNumber, provider.episodes!.map((episode) => episode.episode_number), false)}>
+                      Clear season progress
+                    </button>
+                  </div>
+                )}
                 <div className="episode-list">
                   {(provider?.episodes ?? []).map((episode) => {
                     const watched = watchedEpisodes.some((entry) => entry.season_number === seasonNumber && entry.episode_number === episode.episode_number);
@@ -849,6 +883,35 @@ export default function HomePage() {
       setMedia((previous) => previous.map((entry) => entry.id === updated.id ? updated : entry));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Unable to save episode.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleSeason(season: number, episodeNumbers: number[], watched: boolean) {
+    if (!selectedItem || saving || !episodeNumbers.length) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await setSeasonWatched(selectedItem.id, season, episodeNumbers, watched);
+      const episodes = await getWatchedEpisodes(selectedItem.id);
+      setWatchedEpisodes((previous) => [
+        ...previous.filter((entry) => entry.media_id !== selectedItem.id),
+        ...episodes,
+      ]);
+      const updated = await updateMedia(selectedItem.id, {
+        current_season: season,
+        last_watched_episode: watched ? Math.max(...episodeNumbers) : 0,
+        ...(watched ? { status: "watching" as const } : {}),
+      });
+      setMedia((previous) => previous.map((entry) => entry.id === updated.id ? updated : entry));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to update season progress.");
+      // Refresh partial results if any batch succeeded before an error.
+      try {
+        const episodes = await getWatchedEpisodes(selectedItem.id);
+        setWatchedEpisodes((previous) => [...previous.filter((entry) => entry.media_id !== selectedItem.id), ...episodes]);
+      } catch { /* Keep existing display until next refresh. */ }
     } finally {
       setSaving(false);
     }
@@ -1207,6 +1270,7 @@ export default function HomePage() {
           error={saveError}
           watchedEpisodes={watchedEpisodes.filter((entry) => entry.media_id === selectedItem.id)}
           onToggleEpisode={handleToggleEpisode}
+          onToggleSeason={handleToggleSeason}
         />
       )}
 

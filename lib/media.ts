@@ -32,6 +32,7 @@ export type SavedMedia = {
   current_volume: number | null;
   last_read_chapter: number | null;
   total_chapters: number | null;
+  total_volumes: number | null;
   movie_progress_seconds: number | null;
   runtime_minutes: number | null;
   notes: string | null;

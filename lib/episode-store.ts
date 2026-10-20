@@ -54,3 +54,39 @@ export async function setEpisodeWatched(
     if (error) throw error;
   }
 }
+
+/** Batch update: one request for a whole season, preserving all other seasons. */
+export async function setSeasonWatched(
+  mediaId: string,
+  seasonNumber: number,
+  episodeNumbers: number[],
+  watched: boolean,
+): Promise<void> {
+  const userId = await requireUserId();
+  const unique = [...new Set(episodeNumbers)].filter((n) => Number.isInteger(n) && n >= 0);
+  if (!unique.length) return;
+  // Supabase/PostgREST requests are bounded to avoid excessively large payloads.
+  for (let offset = 0; offset < unique.length; offset += 100) {
+    const batch = unique.slice(offset, offset + 100);
+    if (watched) {
+      const { error } = await supabase.from("media_episode_progress").upsert(
+        batch.map((episodeNumber) => ({
+          user_id: userId,
+          media_id: mediaId,
+          season_number: seasonNumber,
+          episode_number: episodeNumber,
+        })),
+        { onConflict: "user_id,media_id,season_number,episode_number" },
+      );
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("media_episode_progress")
+        .delete()
+        .eq("user_id", userId)
+        .eq("media_id", mediaId)
+        .eq("season_number", seasonNumber)
+        .in("episode_number", batch);
+      if (error) throw error;
+    }
+  }
+}
