@@ -36,6 +36,7 @@ import {
 } from "@/lib/media";
 
 import { getMyMedia, updateMedia } from "@/lib/media-store";
+import { getWatchedEpisodes, setEpisodeWatched, type WatchedEpisode } from "@/lib/episode-store";
 
 type View =
   | "home"
@@ -49,6 +50,21 @@ type Category = "all" | MediaType;
 type Sort = "recent" | "title" | "year";
 
 type MediaChanges = Parameters<typeof updateMedia>[1];
+
+type SeasonInfo = { season_number: number; name: string; episode_count: number; air_date: string | null };
+type EpisodeInfo = { id: number; episode_number: number; name: string; overview: string; air_date: string | null; runtime_minutes: number | null };
+type ProviderDetails = {
+  runtime_minutes?: number | null;
+  total_episodes?: number | null;
+  seasons?: SeasonInfo[];
+  episodes?: EpisodeInfo[] | null;
+  selected_season?: number | null;
+  chapters?: number | null;
+  volumes?: number | null;
+  publication_status?: string | null;
+};
+
+
 
 const navItems: {
   id: View;
@@ -92,13 +108,12 @@ function isEpisodic(item: SavedMedia) {
   return item.media_type === "anime" || item.media_type === "series";
 }
 
-function getProgress(item: SavedMedia) {
+function getProgress(item: SavedMedia, watchedCount = 0) {
   if (item.status === "completed") return 100;
 
   if (item.media_type === "movie") {
-    // Duration is not stored in SavedMedia yet.
-    // Do not treat seconds as a percentage.
-    return 0;
+    if (!item.runtime_minutes || item.runtime_minutes <= 0) return 0;
+    return Math.min(100, Math.round(((item.movie_progress_seconds ?? 0) / (item.runtime_minutes * 60)) * 100));
   }
 
   if (item.media_type === "manga") {
@@ -112,10 +127,7 @@ function getProgress(item: SavedMedia) {
 
   if (!item.total_episodes) return 0;
 
-  return Math.min(
-    100,
-    Math.round(((item.last_watched_episode ?? 0) / item.total_episodes) * 100),
-  );
+  return Math.min(100, Math.round((watchedCount / item.total_episodes) * 100));
 }
 
 function getProgressLabel(item: SavedMedia) {
@@ -140,13 +152,15 @@ function getProgressLabel(item: SavedMedia) {
 function MediaPoster({
   item,
   onClick,
+  watchedCount,
 }: {
   item: SavedMedia;
   onClick: () => void;
+  watchedCount: number;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const poster = posterUrl(item.poster_path);
-  const progress = getProgress(item);
+  const progress = getProgress(item, watchedCount);
 
   return (
     <button type="button" className="media-card" onClick={onClick}>
@@ -173,7 +187,7 @@ function MediaPoster({
 
         <div className="media-card-subtitle">{getProgressLabel(item)}</div>
 
-        {item.status === "watching" && item.media_type !== "movie" && (
+        {item.status === "watching" && (
           <div className="media-progress-row">
             <div className="progress-track">
               <div
@@ -194,11 +208,13 @@ function MediaSection({
   items,
   onSelect,
   onSeeAll,
+  watchedCounts,
 }: {
   title: string;
   items: SavedMedia[];
   onSelect: (item: SavedMedia) => void;
   onSeeAll: () => void;
+  watchedCounts: Record<string, number>;
 }) {
   if (!items.length) return null;
 
@@ -217,6 +233,7 @@ function MediaSection({
           <MediaPoster
             key={item.id}
             item={item}
+            watchedCount={watchedCounts[item.id] ?? 0}
             onClick={() => onSelect(item)}
           />
         ))}
@@ -258,12 +275,16 @@ function MediaDetails({
   onUpdate,
   saving,
   error,
+  watchedEpisodes,
+  onToggleEpisode,
 }: {
   item: SavedMedia;
   onClose: () => void;
   onUpdate: (id: string, changes: MediaChanges) => Promise<void>;
   saving: boolean;
   error: string;
+  watchedEpisodes: WatchedEpisode[];
+  onToggleEpisode: (season: number, episode: number, watched: boolean) => Promise<void>;
 }) {
   const [tab, setTab] = useState<"overview" | "episodes" | "details" | "notes">(
     "overview",
@@ -274,8 +295,66 @@ function MediaDetails({
     String(Math.floor((item.movie_progress_seconds ?? 0) / 60)),
   );
 
+  const [provider, setProvider] = useState<ProviderDetails | null>(null);
+  const [providerLoading, setProviderLoading] = useState(false);
+  const [providerError, setProviderError] = useState("");
+  const [seasonNumber, setSeasonNumber] = useState(item.current_season ?? 1);
+  const [chapterInput, setChapterInput] = useState(String(item.last_read_chapter ?? 0));
+  const [volumeInput, setVolumeInput] = useState(String(item.current_volume ?? 0));
+
+  useEffect(() => {
+    setChapterInput(String(item.last_read_chapter ?? 0));
+    setVolumeInput(String(item.current_volume ?? 0));
+  }, [item.last_read_chapter, item.current_volume]);
+
+  useEffect(() => {
+    if (!item.external_id) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      source: item.source,
+      type: item.media_type,
+      id: item.external_id,
+    });
+    if (item.media_type === "series" || item.media_type === "anime") {
+      params.set("season", String(seasonNumber));
+    }
+    setProviderLoading(true);
+    setProviderError("");
+    setProvider(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/media/details?${params}`, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Unable to load details.");
+        if (!controller.signal.aborted) {
+          const details = data as ProviderDetails;
+          setProvider(details);
+          const changes: MediaChanges = {};
+          if (item.media_type === "movie" && details.runtime_minutes != null && details.runtime_minutes !== item.runtime_minutes) changes.runtime_minutes = details.runtime_minutes;
+          if (item.media_type === "manga" && details.chapters != null && details.chapters !== item.total_chapters) changes.total_chapters = details.chapters;
+          if (isEpisodic(item) && details.total_episodes != null && details.total_episodes !== item.total_episodes) changes.total_episodes = details.total_episodes;
+          if (Object.keys(changes).length) void onUpdate(item.id, changes);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setProviderError(err instanceof Error ? err.message : "Unable to load details.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setProviderLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [item.source, item.media_type, item.external_id, seasonNumber]);
+
+  function selectSeason(value: number) {
+    setSeasonNumber(value);
+    if (value !== (item.current_season ?? 1)) {
+      // Only change the displayed season. Save progress when an episode is selected.
+    }
+  }
+
   const episodic = isEpisodic(item);
-  const progress = getProgress(item);
+  const progress = getProgress(item, watchedEpisodes.length);
   const poster = posterUrl(item.poster_path);
 
   useEffect(() => {
@@ -299,10 +378,11 @@ function MediaDetails({
     }
 
     if (episodic) {
-      return onUpdate(item.id, {
-        last_watched_episode: (item.last_watched_episode ?? 0) + 1,
-        status: "watching",
-      });
+      const seasonEpisodes = watchedEpisodes
+        .filter((entry) => entry.season_number === seasonNumber)
+        .map((entry) => entry.episode_number);
+      const next = Math.max(0, ...seasonEpisodes) + 1;
+      return onToggleEpisode(seasonNumber, next, true);
     }
 
     return updateStatus("completed");
@@ -433,14 +513,14 @@ function MediaDetails({
             <div className="progress-panel">
               <div className="progress-panel-header">
                 <strong>Progress</strong>
-                {item.media_type !== "movie" && <span>{progress}%</span>}
+                <span>{progress}%</span>
               </div>
 
               <div className="progress-description">
                 {getProgressLabel(item)}
               </div>
 
-              {item.media_type !== "movie" && (
+              {(
                 <div className="progress-track large">
                   <div
                     className="progress-fill"
@@ -480,6 +560,14 @@ function MediaDetails({
                 </div>
               )}
 
+              {providerLoading && <p className="muted-text">Loading provider details...</p>}
+              {providerError && <p className="muted-text" role="status">{providerError}</p>}
+              {item.media_type === "movie" && provider?.runtime_minutes != null && (
+                <p className="muted-text">Runtime: {provider.runtime_minutes} minutes · {Math.min(100, Math.round(((item.movie_progress_seconds ?? 0) / 60 / Math.max(1, provider.runtime_minutes)) * 100))}% watched</p>
+              )}
+              {item.media_type === "manga" && provider && (
+                <p className="muted-text">{provider.chapters ?? "Unknown"} chapters · {provider.volumes ?? "Unknown"} volumes</p>
+              )}
               <div className="progress-info-grid">
                 <div>
                   <span>Current progress</span>
@@ -533,122 +621,81 @@ function MediaDetails({
 
         {tab === "episodes" && (
           <div className="details-body">
-            <div className="episode-heading">
-              <h3>
-                {item.media_type === "manga"
-                  ? "Chapter progress"
-                  : `Season ${item.current_season ?? 1}`}
-              </h3>
-            </div>
-
             {item.media_type === "manga" ? (
               <div className="chapter-controls">
-                <p>Current chapter</p>
-
-                <div className="chapter-number">
-                  {item.last_read_chapter ?? 0}
-                </div>
-
+                <h3>Reading progress</h3>
+                {providerLoading && <p className="muted-text">Loading manga details...</p>}
+                {providerError && <p role="status" className="muted-text">{providerError}</p>}
+                {provider && (
+                  <p className="muted-text">
+                    Total: {provider.chapters ?? "Unknown"} chapters · {provider.volumes ?? "Unknown"} volumes
+                    {provider.publication_status ? ` · ${provider.publication_status.replaceAll("_", " ")}` : ""}
+                  </p>
+                )}
+                <label htmlFor="manga-chapter">Current chapter</label>
+                <input id="manga-chapter" type="number" min="0" step="1" value={chapterInput}
+                  onChange={(event) => setChapterInput(event.target.value)} />
+                <label htmlFor="manga-volume">Current volume</label>
+                <input id="manga-volume" type="number" min="0" step="1" value={volumeInput}
+                  onChange={(event) => setVolumeInput(event.target.value)} />
                 <div className="chapter-buttons">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={saving}
-                    onClick={() =>
-                      onUpdate(item.id, {
-                        last_read_chapter: Math.max(
-                          0,
-                          (item.last_read_chapter ?? 0) - 1,
-                        ),
-                      })
-                    }
-                  >
-                    Previous
+                  <button type="button" className="secondary-button" disabled={saving || (item.last_read_chapter ?? 0) === 0}
+                    onClick={() => onUpdate(item.id, { last_read_chapter: Math.max(0, (item.last_read_chapter ?? 0) - 1) })}>
+                    Previous chapter
                   </button>
-
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={saving}
-                    onClick={advance}
-                  >
-                    <Plus size={16} />
-                    Next chapter
+                  <button type="button" className="primary-button" disabled={saving}
+                    onClick={() => onUpdate(item.id, {
+                      last_read_chapter: Math.max(0, Math.floor(Number(chapterInput) || 0)),
+                      current_volume: Math.max(0, Math.floor(Number(volumeInput) || 0)),
+                      status: "watching",
+                    })}>
+                    Save progress
                   </button>
+                  <button type="button" className="secondary-button" disabled={saving}
+                    onClick={advance}>Next chapter</button>
                 </div>
               </div>
             ) : (
               <>
-                <div className="chapter-buttons">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={saving}
-                    onClick={() =>
-                      onUpdate(item.id, {
-                        current_season: Math.max(
-                          1,
-                          (item.current_season ?? 1) - 1,
-                        ),
-                        last_watched_episode: 0,
-                      })
-                    }
-                  >
-                    Previous season
-                  </button>
-
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={saving}
-                    onClick={() =>
-                      onUpdate(item.id, {
-                        current_season: (item.current_season ?? 1) + 1,
-                        last_watched_episode: 0,
-                      })
-                    }
-                  >
-                    Next season
-                  </button>
+                <div className="episode-heading"><h3>Episodes</h3></div>
+                <div className="chapter-controls">
+                  <label htmlFor="season-select">Season</label>
+                  {provider?.seasons?.length ? (
+                    <select id="season-select" value={seasonNumber}
+                      onChange={(event) => selectSeason(Number(event.target.value))}>
+                      {provider.seasons.map((season) => (
+                        <option key={season.season_number} value={season.season_number}>
+                          {season.name} ({season.episode_count} episodes)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="muted-text">Season {seasonNumber}</p>
+                  )}
                 </div>
-
+                {providerLoading && <p className="muted-text">Loading episodes...</p>}
+                {providerError && <p role="status" className="muted-text">{providerError}</p>}
+                {provider?.episodes?.length === 0 && <p className="muted-text">No episodes listed for this season.</p>}
                 <div className="episode-list">
-                  {Array.from(
-                    {
-                      length: Math.min(item.total_episodes ?? 12, 50),
-                    },
-                    (_, index) => index + 1,
-                  ).map((episode) => {
-                    const watched = episode <= (item.last_watched_episode ?? 0);
-
+                  {(provider?.episodes ?? []).map((episode) => {
+                    const watched = watchedEpisodes.some((entry) => entry.season_number === seasonNumber && entry.episode_number === episode.episode_number);
                     return (
-                      <button
-                        type="button"
-                        key={episode}
-                        className="episode-row"
-                        disabled={saving}
-                        onClick={() =>
-                          onUpdate(item.id, {
-                            last_watched_episode: episode,
-                            status: "watching",
-                          })
-                        }
-                      >
-                        <span className="episode-number">{episode}</span>
-
-                        <span className="episode-title">Episode {episode}</span>
-
-                        <span
-                          className={`episode-check ${
-                            watched ? "checked" : ""
-                          }`}
-                        >
+                      <button type="button" key={episode.id} className="episode-row" disabled={saving}
+                        onClick={() => onToggleEpisode(seasonNumber, episode.episode_number, !watched)}>
+                        <span className="episode-number">{episode.episode_number}</span>
+                        <span className="episode-title" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                          <strong>{episode.name || `Episode ${episode.episode_number}`}</strong>
+                          <small>{[episode.air_date, episode.runtime_minutes ? `${episode.runtime_minutes} min` : null].filter(Boolean).join(" · ")}</small>
+                          {episode.overview && <small style={{ textAlign: "left", opacity: 0.7 }}>{episode.overview}</small>}
+                        </span>
+                        <span className={`episode-check ${watched ? "checked" : ""}`}>
                           {watched && <Check size={13} />}
                         </span>
                       </button>
                     );
                   })}
                 </div>
+                <p className="muted-text">Tap an episode to mark it watched or unwatched. Episodes are tracked independently across seasons.</p>
               </>
             )}
           </div>
@@ -677,6 +724,18 @@ function MediaDetails({
                 <strong>{item.status.replace("_", " ")}</strong>
               </div>
 
+              {item.media_type === "movie" && provider?.runtime_minutes != null && (
+                <div><span>Runtime</span><strong>{provider.runtime_minutes} minutes</strong></div>
+              )}
+              {isEpisodic(item) && provider?.total_episodes != null && (
+                <div><span>Total episodes (series)</span><strong>{provider.total_episodes}</strong></div>
+              )}
+              {item.media_type === "manga" && provider && (
+                <>
+                  <div><span>Chapters</span><strong>{provider.chapters ?? "Unknown"}</strong></div>
+                  <div><span>Volumes</span><strong>{provider.volumes ?? "Unknown"}</strong></div>
+                </>
+              )}
               <div>
                 <span>Source</span>
                 <strong>{item.source}</strong>
@@ -717,6 +776,7 @@ function MediaDetails({
 
 export default function HomePage() {
   const [media, setMedia] = useState<SavedMedia[]>([]);
+  const [watchedEpisodes, setWatchedEpisodes] = useState<WatchedEpisode[]>([]);
   const [view, setView] = useState<View>("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<Category>("all");
@@ -734,8 +794,9 @@ export default function HomePage() {
     setLoadError("");
 
     try {
-      const items = await getMyMedia();
+      const [items, episodes] = await Promise.all([getMyMedia(), getWatchedEpisodes()]);
       setMedia(items);
+      setWatchedEpisodes(episodes);
     } catch (error) {
       console.error("Failed to load media:", error);
 
@@ -762,6 +823,36 @@ export default function HomePage() {
   }, [refreshMedia]);
 
   const selectedItem = media.find((item) => item.id === selectedId) ?? null;
+  const watchedCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const episode of watchedEpisodes) counts[episode.media_id] = (counts[episode.media_id] ?? 0) + 1;
+    return counts;
+  }, [watchedEpisodes]);
+
+  async function handleToggleEpisode(season: number, episode: number, watched: boolean) {
+    if (!selectedItem || saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await setEpisodeWatched(selectedItem.id, season, episode, watched);
+      const episodes = await getWatchedEpisodes(selectedItem.id);
+      setWatchedEpisodes((previous) => [
+        ...previous.filter((entry) => entry.media_id !== selectedItem.id),
+        ...episodes,
+      ]);
+      // Keep legacy season/episode display as the most recently selected position.
+      const updated = await updateMedia(selectedItem.id, {
+        current_season: season,
+        last_watched_episode: episode,
+        status: watched ? "watching" : selectedItem.status,
+      });
+      setMedia((previous) => previous.map((entry) => entry.id === updated.id ? updated : entry));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to save episode.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const counts = useMemo(
     () => ({
@@ -986,6 +1077,7 @@ export default function HomePage() {
                   items={media.filter((item) => item.status === "watching")}
                   onSelect={(item) => setSelectedId(item.id)}
                   onSeeAll={() => navigate("library")}
+                  watchedCounts={watchedCounts}
                 />
 
                 <MediaSection
@@ -993,6 +1085,7 @@ export default function HomePage() {
                   items={media.filter((item) => item.status === "watch_later")}
                   onSelect={(item) => setSelectedId(item.id)}
                   onSeeAll={() => navigate("watch_later")}
+                  watchedCounts={watchedCounts}
                 />
 
                 <MediaSection
@@ -1000,6 +1093,7 @@ export default function HomePage() {
                   items={media.filter((item) => item.status === "completed")}
                   onSelect={(item) => setSelectedId(item.id)}
                   onSeeAll={() => navigate("completed")}
+                  watchedCounts={watchedCounts}
                 />
               </>
             )}
@@ -1038,6 +1132,7 @@ export default function HomePage() {
                   <MediaPoster
                     key={item.id}
                     item={item}
+                    watchedCount={watchedCounts[item.id] ?? 0}
                     onClick={() => setSelectedId(item.id)}
                   />
                 ))}
@@ -1110,6 +1205,8 @@ export default function HomePage() {
           onUpdate={handleUpdate}
           saving={saving}
           error={saveError}
+          watchedEpisodes={watchedEpisodes.filter((entry) => entry.media_id === selectedItem.id)}
+          onToggleEpisode={handleToggleEpisode}
         />
       )}
 

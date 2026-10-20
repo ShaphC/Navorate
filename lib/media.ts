@@ -1,5 +1,4 @@
 export type MediaType = "movie" | "series" | "anime" | "manga";
-
 export type MediaStatus = "watching" | "watch_later" | "completed" | "on_hold";
 
 export type SearchItem = {
@@ -34,6 +33,7 @@ export type SavedMedia = {
   last_read_chapter: number | null;
   total_chapters: number | null;
   movie_progress_seconds: number | null;
+  runtime_minutes: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -41,14 +41,7 @@ export type SavedMedia = {
 
 export function posterUrl(path: string | null) {
   if (!path) return "";
-
-  if (path.startsWith("https://")) {
-    return path;
-  }
-
-  if (path.startsWith("/")) {
-    return `https://image.tmdb.org/t/p/w500${path}`;
-  }
-
+  if (path.startsWith("https://")) return path;
+  if (path.startsWith("/")) return `https://image.tmdb.org/t/p/w500${path}`;
   return "";
 }
