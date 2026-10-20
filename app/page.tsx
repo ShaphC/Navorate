@@ -53,6 +53,7 @@ type MediaChanges = Parameters<typeof updateMedia>[1];
 
 type SeasonInfo = { season_number: number; name: string; episode_count: number; air_date: string | null };
 type EpisodeInfo = { id: number; episode_number: number; name: string; overview: string; air_date: string | null; runtime_minutes: number | null };
+type VolumeIndex = { total_volumes: number | null; source: string | null; source_url: string | null; status: string };
 type ChapterIndex = { title: string; source: string; source_url: string; latest_chapter: string; latest_full_chapter: number | null; chapters: { number: string; value: number; url: string }[] };
 
 type ProviderDetails = {
@@ -301,6 +302,8 @@ function MediaDetails({
 
   const [provider, setProvider] = useState<ProviderDetails | null>(null);
   const [chapterIndex, setChapterIndex] = useState<ChapterIndex | null>(null);
+  const [volumeIndex, setVolumeIndex] = useState<VolumeIndex | null>(null);
+  const [volumeLoading, setVolumeLoading] = useState(false);
   const [chapterIndexError, setChapterIndexError] = useState("");
   const [chapterIndexLoading, setChapterIndexLoading] = useState(false);
   const [providerLoading, setProviderLoading] = useState(false);
@@ -392,6 +395,36 @@ function MediaDetails({
         if (!controller.signal.aborted) setChapterIndexError(error instanceof Error ? error.message : "Chapter index unavailable.");
       } finally {
         if (!controller.signal.aborted) setChapterIndexLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [item.id, item.media_type, item.title, item.original_title]);
+
+  useEffect(() => {
+    if (item.media_type !== "manga") return;
+    const normalized = (item.title + " " + (item.original_title ?? "")).toLowerCase();
+    const key = /blue\s*lock|ブルーロック/.test(normalized) ? "blue-lock"
+      : /world\s*trigger|ワールドトリガー/.test(normalized) ? "world-trigger" : null;
+    setVolumeIndex(null);
+    if (!key) return;
+    const controller = new AbortController();
+    setVolumeLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/media/volumes?title=${key}`, { signal: controller.signal });
+        if (!(response.headers.get("content-type") ?? "").includes("application/json")) throw new Error("Volume API did not return JSON");
+        const data = await response.json() as VolumeIndex;
+        if (!response.ok) throw new Error("Volume lookup unavailable");
+        if (controller.signal.aborted) return;
+        setVolumeIndex(data);
+        // Never reduce an existing total if a source is stale.
+        if (data.total_volumes != null && data.total_volumes > (item.total_volumes ?? 0)) {
+          void onUpdate(item.id, { total_volumes: data.total_volumes });
+        }
+      } catch {
+        if (!controller.signal.aborted) setVolumeIndex(null);
+      } finally {
+        if (!controller.signal.aborted) setVolumeLoading(false);
       }
     })();
     return () => controller.abort();
@@ -677,9 +710,11 @@ function MediaDetails({
                 <div className="episode-heading"><h3>Reading progress</h3></div>
                 <div className="progress-info-grid">
                   <div><span>Chapters available</span><strong>{item.total_chapters ?? chapterIndex?.latest_full_chapter ?? provider?.chapters ?? "—"}</strong></div>
-                  <div><span>Volumes published</span><strong>{item.total_volumes ?? provider?.volumes ?? "—"}</strong></div>
+                  <div><span>Volumes published</span><strong>{Math.max(item.total_volumes ?? 0, volumeIndex?.total_volumes ?? 0, provider?.volumes ?? 0) || "—"}</strong></div>
                 </div>
                 {chapterIndexLoading && <p className="muted-text">Checking latest chapters…</p>}
+                {volumeLoading && <p className="muted-text">Checking published volumes…</p>}
+                {volumeIndex?.source && <p className="muted-text">Volume count: <a href={volumeIndex.source_url ?? "#"} target="_blank" rel="noopener noreferrer">{volumeIndex.source}</a> · Japanese publication metadata</p>}
                 {chapterIndex && (
                   <div className="season-preview">
                     <h3>Recent chapters</h3>
