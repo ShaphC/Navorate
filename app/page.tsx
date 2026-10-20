@@ -400,7 +400,7 @@ function MediaDetails({
           {(
             [
               "overview",
-              ...(episodic || item.media_type === "manga" ? ["episodes"] : []),
+              ...(episodic || item.media_type === "manga" ? (["episodes"] as const) : []),
               "details",
               "notes",
             ] as const
@@ -891,6 +891,8 @@ export default function HomePage() {
                 query={searchQuery}
                 onQueryChange={setSearchQuery}
                 onViewAll={() => navigate("search")}
+                onAdded={refreshMedia}
+                savedKeys={media.map((item) => `${item.source}-${item.external_id}`)}
               />
             )}
 
