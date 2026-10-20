@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireApiUser } from "@/lib/api-auth";
 
 type MediaType = "movie" | "series" | "anime" | "manga";
 
@@ -49,9 +50,12 @@ type AniListMedia = {
   status: string | null;
 };
 
+const privateHeaders = { "Cache-Control": "private, no-store" };
+
 async function tmdbFetch<T>(path: string): Promise<T> {
   const token = process.env.TMDB_API_READ_ACCESS_TOKEN;
   if (!token) throw new Error("TMDB_API_READ_ACCESS_TOKEN is missing.");
+
   const response = await fetch(`https://api.themoviedb.org/3${path}`, {
     headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
     next: { revalidate: 3600 },
@@ -78,6 +82,9 @@ async function anilistDetails(id: number) {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireApiUser();
+  if (auth.response) return auth.response;
+
   const params = request.nextUrl.searchParams;
   const source = params.get("source");
   const type = params.get("type") as MediaType | null;
@@ -85,16 +92,16 @@ export async function GET(request: NextRequest) {
   const seasonRaw = params.get("season");
 
   if (!/^[1-9]\d{0,14}$/.test(idRaw)) {
-    return NextResponse.json({ error: "Invalid media ID." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid media ID." }, { status: 400, headers: privateHeaders });
   }
   if (!type || !["movie", "series", "anime", "manga"].includes(type)) {
-    return NextResponse.json({ error: "Invalid media type." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid media type." }, { status: 400, headers: privateHeaders });
   }
   if ((type === "manga" && source !== "anilist") || (type !== "manga" && source !== "tmdb")) {
-    return NextResponse.json({ error: "Invalid provider for media type." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid provider for media type." }, { status: 400, headers: privateHeaders });
   }
   if (seasonRaw !== null && (!/^\d{1,3}$/.test(seasonRaw) || Number(seasonRaw) > 999)) {
-    return NextResponse.json({ error: "Invalid season number." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid season number." }, { status: 400, headers: privateHeaders });
   }
 
   try {
@@ -105,12 +112,12 @@ export async function GET(request: NextRequest) {
         chapters: manga.chapters,
         volumes: manga.volumes,
         publication_status: manga.status,
-      });
+      }, { headers: privateHeaders });
     }
 
     if (type === "movie") {
       const movie = await tmdbFetch<TMDBMovie>(`/movie/${idRaw}?language=en-US`);
-      return NextResponse.json({ source, type, external_id: idRaw, runtime_minutes: movie.runtime });
+      return NextResponse.json({ source, type, external_id: idRaw, runtime_minutes: movie.runtime }, { headers: privateHeaders });
     }
 
     const show = await tmdbFetch<TMDBShow>(`/tv/${idRaw}?language=en-US`);
@@ -125,7 +132,7 @@ export async function GET(request: NextRequest) {
     const selectedSeason = seasonRaw === null ? null : Number(seasonRaw);
     const seasonExists = selectedSeason === null || seasons.some((s) => s.season_number === selectedSeason);
     if (!seasonExists) {
-      return NextResponse.json({ error: "Season not found." }, { status: 404 });
+      return NextResponse.json({ error: "Season not found." }, { status: 404, headers: privateHeaders });
     }
 
     let episodes: Array<{
@@ -156,9 +163,9 @@ export async function GET(request: NextRequest) {
       total_episodes: show.number_of_episodes,
       total_seasons: show.number_of_seasons,
       seasons, selected_season: selectedSeason, episodes,
-    });
+    }, { headers: privateHeaders });
   } catch (error) {
     console.error("Media details provider error:", error);
-    return NextResponse.json({ error: "Unable to load media details from the provider." }, { status: 502 });
+    return NextResponse.json({ error: "Unable to load media details from the provider." }, { status: 502, headers: privateHeaders });
   }
 }
