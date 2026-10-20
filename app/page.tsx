@@ -53,6 +53,8 @@ type MediaChanges = Parameters<typeof updateMedia>[1];
 
 type SeasonInfo = { season_number: number; name: string; episode_count: number; air_date: string | null };
 type EpisodeInfo = { id: number; episode_number: number; name: string; overview: string; air_date: string | null; runtime_minutes: number | null };
+type ChapterIndex = { title: string; source: string; source_url: string; latest_chapter: string; latest_full_chapter: number | null; chapters: { number: string; value: number; url: string }[] };
+
 type ProviderDetails = {
   runtime_minutes?: number | null;
   total_episodes?: number | null;
@@ -298,6 +300,9 @@ function MediaDetails({
   );
 
   const [provider, setProvider] = useState<ProviderDetails | null>(null);
+  const [chapterIndex, setChapterIndex] = useState<ChapterIndex | null>(null);
+  const [chapterIndexError, setChapterIndexError] = useState("");
+  const [chapterIndexLoading, setChapterIndexLoading] = useState(false);
   const [providerLoading, setProviderLoading] = useState(false);
   const [providerError, setProviderError] = useState("");
   const [seasonNumber, setSeasonNumber] = useState(item.current_season ?? 1);
@@ -355,6 +360,42 @@ function MediaDetails({
     })();
     return () => controller.abort();
   }, [item.source, item.media_type, item.external_id, seasonNumber]);
+
+  useEffect(() => {
+    if (item.media_type !== "manga") return;
+    const normalized = (item.title + " " + (item.original_title ?? "")).toLowerCase();
+    const key = /blue\s*lock|ブルーロック/.test(normalized)
+      ? "blue-lock"
+      : /world\s*trigger|ワールドトリガー/.test(normalized)
+        ? "world-trigger"
+        : null;
+    if (!key) return;
+    const controller = new AbortController();
+    setChapterIndexLoading(true);
+    setChapterIndexError("");
+    void (async () => {
+      try {
+        const response = await fetch(`/api/media/chapters?title=${key}`, { signal: controller.signal });
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Chapter API returned a webpage (HTTP ${response.status}). Check that app/api/media/chapters/route.ts exists and restart or redeploy Next.js.`);
+        }
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Chapter index unavailable.");
+        if (controller.signal.aborted) return;
+        const index = data as ChapterIndex;
+        setChapterIndex(index);
+        if (index.latest_full_chapter != null && index.latest_full_chapter > (item.total_chapters ?? 0)) {
+          void onUpdate(item.id, { total_chapters: index.latest_full_chapter });
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setChapterIndexError(error instanceof Error ? error.message : "Chapter index unavailable.");
+      } finally {
+        if (!controller.signal.aborted) setChapterIndexLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [item.id, item.media_type, item.title, item.original_title]);
 
   function selectSeason(value: number) {
     setSeasonNumber(value);
@@ -632,38 +673,47 @@ function MediaDetails({
         {tab === "episodes" && (
           <div className="details-body">
             {item.media_type === "manga" ? (
-              <div className="chapter-controls">
-                <h3>Reading progress</h3>
-                {providerLoading && <p className="muted-text">Loading manga details...</p>}
-                {providerError && <p role="status" className="muted-text">{providerError}</p>}
-                {provider && (
-                  <p className="muted-text">
-                    Total: {item.total_chapters ?? provider.chapters ?? "Unknown"} chapters · {item.total_volumes ?? provider.volumes ?? "Unknown"} volumes
-                    {provider.publication_status ? ` · ${provider.publication_status.replaceAll("_", " ")}` : ""}
-                  </p>
+              <div className="chapter-controls" style={{ gap: 14 }}>
+                <div className="episode-heading"><h3>Reading progress</h3></div>
+                <div className="progress-info-grid">
+                  <div><span>Chapters available</span><strong>{item.total_chapters ?? chapterIndex?.latest_full_chapter ?? provider?.chapters ?? "—"}</strong></div>
+                  <div><span>Volumes published</span><strong>{item.total_volumes ?? provider?.volumes ?? "—"}</strong></div>
+                </div>
+                {chapterIndexLoading && <p className="muted-text">Checking latest chapters…</p>}
+                {chapterIndex && (
+                  <div className="season-preview">
+                    <h3>Recent chapters</h3>
+                    <p className="muted-text">Latest listed: {chapterIndex.latest_chapter} · {chapterIndex.source}</p>
+                    <div className="chapter-buttons" style={{ flexWrap: "wrap", marginTop: 12 }}>
+                      {chapterIndex.chapters.slice(0, 12).map((chapter) => (
+                        <button key={chapter.number} type="button" className="secondary-button"
+                          onClick={() => setChapterInput(String(Math.floor(chapter.value)))}>
+                          {chapter.number}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-                <p className="muted-text">If AniList has no totals, enter them yourself. Saved totals are used for progress percentages.</p>
-                <label htmlFor="manga-total-chapters">Total chapters (optional)</label>
-                <input id="manga-total-chapters" type="number" min="0" step="1" placeholder="Unknown"
-                  value={chapterTotalInput} onChange={(event) => setChapterTotalInput(event.target.value)} />
-                <label htmlFor="manga-total-volumes">Total volumes (optional)</label>
-                <input id="manga-total-volumes" type="number" min="0" step="1" placeholder="Unknown"
-                  value={volumeTotalInput} onChange={(event) => setVolumeTotalInput(event.target.value)} />
-                <button type="button" className="secondary-button" disabled={saving}
-                  onClick={() => onUpdate(item.id, {
-                    total_chapters: chapterTotalInput.trim() === "" ? null : Math.max(0, Math.floor(Number(chapterTotalInput) || 0)),
-                    total_volumes: volumeTotalInput.trim() === "" ? null : Math.max(0, Math.floor(Number(volumeTotalInput) || 0)),
-                  })}>Save manga totals</button>
-                <label htmlFor="manga-chapter">Current chapter</label>
-                <input id="manga-chapter" type="number" min="0" step="1" value={chapterInput}
-                  onChange={(event) => setChapterInput(event.target.value)} />
-                <label htmlFor="manga-volume">Current volume</label>
-                <input id="manga-volume" type="number" min="0" step="1" value={volumeInput}
-                  onChange={(event) => setVolumeInput(event.target.value)} />
-                <div className="chapter-buttons">
+                {chapterIndexError && (
+                  <p className="muted-text" role="status">Chapter listings are temporarily unavailable. You can still track what you've read.</p>
+                )}
+                {providerLoading && <p className="muted-text">Loading manga details…</p>}
+                <div className="progress-info-grid">
+                  <div>
+                    <label htmlFor="manga-chapter">Current chapter</label>
+                    <input id="manga-chapter" type="number" min="0" step="1" value={chapterInput}
+                      onChange={(event) => setChapterInput(event.target.value)} />
+                  </div>
+                  <div>
+                    <label htmlFor="manga-volume">Current volume</label>
+                    <input id="manga-volume" type="number" min="0" step="1" value={volumeInput}
+                      onChange={(event) => setVolumeInput(event.target.value)} />
+                  </div>
+                </div>
+                <div className="chapter-buttons" style={{ flexWrap: "wrap" }}>
                   <button type="button" className="secondary-button" disabled={saving || (item.last_read_chapter ?? 0) === 0}
                     onClick={() => onUpdate(item.id, { last_read_chapter: Math.max(0, (item.last_read_chapter ?? 0) - 1) })}>
-                    Previous chapter
+                    <ChevronLeft size={16} /> Previous
                   </button>
                   <button type="button" className="primary-button" disabled={saving}
                     onClick={() => onUpdate(item.id, {
@@ -671,10 +721,11 @@ function MediaDetails({
                       current_volume: Math.max(0, Math.floor(Number(volumeInput) || 0)),
                       status: "watching",
                     })}>
-                    Save progress
+                    <Check size={16} /> Save progress
                   </button>
-                  <button type="button" className="secondary-button" disabled={saving}
-                    onClick={advance}>Next chapter</button>
+                  <button type="button" className="secondary-button" disabled={saving} onClick={advance}>
+                    Next <ChevronRight size={16} />
+                  </button>
                 </div>
               </div>
             ) : (
