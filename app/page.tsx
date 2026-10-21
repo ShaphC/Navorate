@@ -203,49 +203,64 @@ function MediaPoster({
 
   return (
     <div className="media-card" style={{ position: "relative" }}>
-      <button type="button" onClick={onClick} aria-label={`View ${item.title}`} style={{ display: "block", width: "100%", textAlign: "inherit", border: 0, padding: 0, background: "transparent", color: "inherit", cursor: "pointer" }}>
-      <div className="poster-container">
-        {poster && !imageFailed ? (
-          <img
-            src={poster}
-            alt={item.title}
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <div className="poster-fallback">
-            <Film size={28} />
-            <span>{item.title}</span>
-          </div>
-        )}
-
-        <span className="poster-type">{item.media_type}</span>
-      </div>
-
-      <div className="media-card-info">
-        <div className="media-card-title">{item.title}</div>
-
-        <div className="media-card-subtitle">{getProgressLabel(item)}</div>
-
-        {item.status === "watching" && (
-          <div className="media-progress-row">
-            <div className="progress-track">
-              <div
-                className="progress-fill"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span>{progress}%</span>
-          </div>
-        )}
-      </div>
-      </button>
       <button
         type="button"
+        onClick={onClick}
+        aria-label={`View ${item.title}`}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "inherit",
+          border: 0,
+          padding: 0,
+          background: "transparent",
+          color: "inherit",
+          cursor: "pointer",
+        }}
+      >
+        <div className="poster-container">
+          {poster && !imageFailed ? (
+            <img
+              src={poster}
+              alt={item.title}
+              loading="lazy"
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <div className="poster-fallback">
+              <Film size={28} />
+              <span>{item.title}</span>
+            </div>
+          )}
+
+          <span className="poster-type">{item.media_type}</span>
+        </div>
+
+        <div className="media-card-info">
+          <div className="media-card-title">{item.title}</div>
+
+          <div className="media-card-subtitle">{getProgressLabel(item)}</div>
+
+          {item.status === "watching" && (
+            <div className="media-progress-row">
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <span>{progress}%</span>
+            </div>
+          )}
+        </div>
+      </button>
+
+      <button
+        type="button"
+        className="media-card-delete"
         aria-label={`Delete ${item.title} from library`}
         title="Delete from Library"
         onClick={onDeleteClick}
-        style={{ position: "absolute", top: 10, right: 10, zIndex: 2, width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 9, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(18,18,28,0.82)", color: "#ffb4b4", cursor: "pointer" }}
       >
         <Trash2 size={17} />
       </button>
@@ -1239,7 +1254,12 @@ function MediaDetails({
           </div>
         )}
 
-        <div style={{ padding: "18px 24px 28px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+        <div
+          style={{
+            padding: "18px 24px 28px",
+            borderTop: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
           <button
             type="button"
             className="secondary-button"
@@ -1254,8 +1274,19 @@ function MediaDetails({
         {confirmDelete && (
           <div
             role="presentation"
-            onClick={() => { if (!saving) setConfirmDelete(false); }}
-            style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+            onClick={() => {
+              if (!saving) setConfirmDelete(false);
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 1000,
+              background: "rgba(0,0,0,0.72)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+            }}
           >
             <div
               role="alertdialog"
@@ -1263,15 +1294,51 @@ function MediaDetails({
               aria-labelledby="delete-media-heading"
               aria-describedby="delete-media-description"
               onClick={(event) => event.stopPropagation()}
-              style={{ width: "100%", maxWidth: 430, background: "#17172b", color: "#f5f3ff", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 16, padding: 24, boxShadow: "0 24px 70px rgba(0,0,0,0.5)" }}
+              style={{
+                width: "100%",
+                maxWidth: 430,
+                background: "#17172b",
+                color: "#f5f3ff",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 16,
+                padding: 24,
+                boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
+              }}
             >
-              <h2 id="delete-media-heading" style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Delete from Library?</h2>
-              <p id="delete-media-description" style={{ color: "#c5c2d6", lineHeight: 1.6, marginBottom: 20 }}>
-                Remove <strong>{item.title}</strong> and its saved progress from your library? This cannot be undone.
+              <h2
+                id="delete-media-heading"
+                style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}
+              >
+                Delete from Library?
+              </h2>
+              <p
+                id="delete-media-description"
+                style={{ color: "#c5c2d6", lineHeight: 1.6, marginBottom: 20 }}
+              >
+                Remove <strong>{item.title}</strong> and its saved progress from
+                your library? This cannot be undone.
               </p>
-              {error && <p role="alert" style={{ color: "#ff9b9b", marginBottom: 14 }}>{error}</p>}
-              <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <button type="button" className="secondary-button" disabled={saving} onClick={() => setConfirmDelete(false)}>Cancel</button>
+              {error && (
+                <p role="alert" style={{ color: "#ff9b9b", marginBottom: 14 }}>
+                  {error}
+                </p>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  justifyContent: "flex-end",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={saving}
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </button>
                 <button
                   type="button"
                   className="primary-button"
@@ -1494,11 +1561,15 @@ export default function HomePage() {
     try {
       await deleteMedia(id);
       setMedia((previous) => previous.filter((item) => item.id !== id));
-      setWatchedEpisodes((previous) => previous.filter((entry) => entry.media_id !== id));
+      setWatchedEpisodes((previous) =>
+        previous.filter((entry) => entry.media_id !== id),
+      );
       setSelectedId(null);
     } catch (error) {
       console.error("Failed to delete media:", error);
-      setSaveError(error instanceof Error ? error.message : "Unable to delete media.");
+      setSaveError(
+        error instanceof Error ? error.message : "Unable to delete media.",
+      );
     } finally {
       setSaving(false);
     }

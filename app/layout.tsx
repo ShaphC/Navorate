@@ -1,8 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Suspense } from "react";
 import { Inter } from "next/font/google";
-
-import AuthGuard from "@/components/AuthGuard";
 
 import "./globals.css";
 
@@ -30,11 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <Suspense fallback={null}>
-          <AuthGuard>{children}</AuthGuard>
-        </Suspense>
-      </body>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }

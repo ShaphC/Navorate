@@ -1670,3 +1670,60 @@ textarea:focus-visible {
     display: none;
   }
 }
+
+/* Media card delete button */
+
+.media-card {
+  position: relative;
+}
+
+.media-card-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+
+  width: 34px;
+  height: 34px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+
+  background: rgba(18, 18, 28, 0.82);
+  color: #ffb4b4;
+  cursor: pointer;
+
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s ease;
+}
+
+/* Show on hover or keyboard focus */
+.media-card:hover .media-card-delete,
+.media-card:focus-within .media-card-delete {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.media-card-delete:hover {
+  background: rgba(180, 35, 54, 0.9);
+  color: #fff;
+}
+
+/* Always visible on touch devices */
+@media (hover: none) {
+  .media-card-delete {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+  }
+}
