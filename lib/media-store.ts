@@ -45,3 +45,27 @@ export async function updateMedia(id: string, changes: MediaChanges): Promise<Sa
   if (error) throw error;
   return data as SavedMedia;
 }
+
+export async function deleteMedia(id: string): Promise<void> {
+  const user = await userId();
+
+  // Remove the user's episode progress first so deletion also works when
+  // the foreign key does not have ON DELETE CASCADE configured.
+  const { error: episodeError } = await supabase
+    .from("media_episode_progress")
+    .delete()
+    .eq("media_id", id)
+    .eq("user_id", user);
+
+  if (episodeError) throw episodeError;
+
+  const { data, error } = await supabase
+    .from("media_items")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user)
+    .select("id");
+
+  if (error) throw error;
+  if (!data?.length) throw new Error("Media item not found or deletion not permitted.");
+}

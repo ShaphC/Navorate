@@ -19,6 +19,7 @@ import {
   Plus,
   Search,
   Settings,
+  Trash2,
   SlidersHorizontal,
   Tv,
   X,
@@ -35,7 +36,7 @@ import {
   type SavedMedia,
 } from "@/lib/media";
 
-import { getMyMedia, updateMedia } from "@/lib/media-store";
+import { deleteMedia, getMyMedia, updateMedia } from "@/lib/media-store";
 import {
   getWatchedEpisodes,
   setEpisodeWatched,
@@ -309,6 +310,7 @@ function MediaDetails({
   item,
   onClose,
   onUpdate,
+  onDelete,
   saving,
   error,
   watchedEpisodes,
@@ -318,6 +320,7 @@ function MediaDetails({
   item: SavedMedia;
   onClose: () => void;
   onUpdate: (id: string, changes: MediaChanges) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   saving: boolean;
   error: string;
   watchedEpisodes: WatchedEpisode[];
@@ -336,6 +339,7 @@ function MediaDetails({
     "overview",
   );
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [note, setNote] = useState(item.notes ?? "");
   const [movieMinutes, setMovieMinutes] = useState(
     String(Math.floor((item.movie_progress_seconds ?? 0) / 60)),
@@ -1216,6 +1220,54 @@ function MediaDetails({
             </p>
           </div>
         )}
+
+        <div style={{ padding: "18px 24px 28px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={saving}
+            onClick={() => setConfirmDelete(true)}
+            style={{ color: "#ff9b9b", borderColor: "rgba(255,155,155,0.35)" }}
+          >
+            <Trash2 size={16} /> Delete from Library
+          </button>
+        </div>
+
+        {confirmDelete && (
+          <div
+            role="presentation"
+            onClick={() => { if (!saving) setConfirmDelete(false); }}
+            style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          >
+            <div
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-media-heading"
+              aria-describedby="delete-media-description"
+              onClick={(event) => event.stopPropagation()}
+              style={{ width: "100%", maxWidth: 430, background: "#17172b", color: "#f5f3ff", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 16, padding: 24, boxShadow: "0 24px 70px rgba(0,0,0,0.5)" }}
+            >
+              <h2 id="delete-media-heading" style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Delete from Library?</h2>
+              <p id="delete-media-description" style={{ color: "#c5c2d6", lineHeight: 1.6, marginBottom: 20 }}>
+                Remove <strong>{item.title}</strong> and its saved progress from your library? This cannot be undone.
+              </p>
+              {error && <p role="alert" style={{ color: "#ff9b9b", marginBottom: 14 }}>{error}</p>}
+              <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button type="button" className="secondary-button" disabled={saving} onClick={() => setConfirmDelete(false)}>Cancel</button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={saving}
+                  onClick={() => void onDelete(item.id)}
+                  style={{ background: "#b42336", color: "#fff" }}
+                >
+                  {saving ? <Loader2 size={16} /> : <Trash2 size={16} />}
+                  {saving ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1409,6 +1461,25 @@ export default function HomePage() {
       setSaveError(
         error instanceof Error ? error.message : "Unable to save changes.",
       );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (saving) return;
+
+    setSaving(true);
+    setSaveError("");
+
+    try {
+      await deleteMedia(id);
+      setMedia((previous) => previous.filter((item) => item.id !== id));
+      setWatchedEpisodes((previous) => previous.filter((entry) => entry.media_id !== id));
+      setSelectedId(null);
+    } catch (error) {
+      console.error("Failed to delete media:", error);
+      setSaveError(error instanceof Error ? error.message : "Unable to delete media.");
     } finally {
       setSaving(false);
     }
@@ -1708,6 +1779,7 @@ export default function HomePage() {
           item={selectedItem}
           onClose={() => setSelectedId(null)}
           onUpdate={handleUpdate}
+          onDelete={handleDelete}
           saving={saving}
           error={saveError}
           watchedEpisodes={watchedEpisodes.filter(
