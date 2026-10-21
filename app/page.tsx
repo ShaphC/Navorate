@@ -190,17 +190,20 @@ function MediaPoster({
   item,
   onClick,
   watchedCount,
+  onDeleteClick,
 }: {
   item: SavedMedia;
   onClick: () => void;
   watchedCount: number;
+  onDeleteClick: () => void;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const poster = posterUrl(item.poster_path);
   const progress = getProgress(item, watchedCount);
 
   return (
-    <button type="button" className="media-card" onClick={onClick}>
+    <div className="media-card" style={{ position: "relative" }}>
+      <button type="button" onClick={onClick} aria-label={`View ${item.title}`} style={{ display: "block", width: "100%", textAlign: "inherit", border: 0, padding: 0, background: "transparent", color: "inherit", cursor: "pointer" }}>
       <div className="poster-container">
         {poster && !imageFailed ? (
           <img
@@ -236,7 +239,17 @@ function MediaPoster({
           </div>
         )}
       </div>
-    </button>
+      </button>
+      <button
+        type="button"
+        aria-label={`Delete ${item.title} from library`}
+        title="Delete from Library"
+        onClick={onDeleteClick}
+        style={{ position: "absolute", top: 10, right: 10, zIndex: 2, width: 34, height: 34, display: "grid", placeItems: "center", borderRadius: 9, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(18,18,28,0.82)", color: "#ffb4b4", cursor: "pointer" }}
+      >
+        <Trash2 size={17} />
+      </button>
+    </div>
   );
 }
 
@@ -246,12 +259,14 @@ function MediaSection({
   onSelect,
   onSeeAll,
   watchedCounts,
+  onDeleteClick,
 }: {
   title: string;
   items: SavedMedia[];
   onSelect: (item: SavedMedia) => void;
   onSeeAll: () => void;
   watchedCounts: Record<string, number>;
+  onDeleteClick: (item: SavedMedia) => void;
 }) {
   if (!items.length) return null;
 
@@ -272,6 +287,7 @@ function MediaSection({
             item={item}
             watchedCount={watchedCounts[item.id] ?? 0}
             onClick={() => onSelect(item)}
+            onDeleteClick={() => onDeleteClick(item)}
           />
         ))}
       </div>
@@ -311,6 +327,7 @@ function MediaDetails({
   onClose,
   onUpdate,
   onDelete,
+  initialConfirmDelete = false,
   saving,
   error,
   watchedEpisodes,
@@ -321,6 +338,7 @@ function MediaDetails({
   onClose: () => void;
   onUpdate: (id: string, changes: MediaChanges) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  initialConfirmDelete?: boolean;
   saving: boolean;
   error: string;
   watchedEpisodes: WatchedEpisode[];
@@ -339,7 +357,7 @@ function MediaDetails({
     "overview",
   );
 
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(initialConfirmDelete);
   const [note, setNote] = useState(item.notes ?? "");
   const [movieMinutes, setMovieMinutes] = useState(
     String(Math.floor((item.movie_progress_seconds ?? 0) / 60)),
@@ -1280,6 +1298,7 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [category, setCategory] = useState<Category>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deleteOnOpen, setDeleteOnOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState<Sort>("recent");
   const [greeting, setGreeting] = useState("Welcome back!");
@@ -1485,6 +1504,12 @@ export default function HomePage() {
     }
   }
 
+  function openMedia(item: SavedMedia, confirmDelete = false) {
+    setSaveError("");
+    setDeleteOnOpen(confirmDelete);
+    setSelectedId(item.id);
+  }
+
   function navigate(nextView: View) {
     setView(nextView);
     setCategory("all");
@@ -1651,7 +1676,8 @@ export default function HomePage() {
                 <MediaSection
                   title="Continue Watching & Reading"
                   items={media.filter((item) => item.status === "watching")}
-                  onSelect={(item) => setSelectedId(item.id)}
+                  onSelect={(item) => openMedia(item)}
+                  onDeleteClick={(item) => openMedia(item, true)}
                   onSeeAll={() => navigate("library")}
                   watchedCounts={watchedCounts}
                 />
@@ -1659,7 +1685,8 @@ export default function HomePage() {
                 <MediaSection
                   title="Watch Later"
                   items={media.filter((item) => item.status === "watch_later")}
-                  onSelect={(item) => setSelectedId(item.id)}
+                  onSelect={(item) => openMedia(item)}
+                  onDeleteClick={(item) => openMedia(item, true)}
                   onSeeAll={() => navigate("watch_later")}
                   watchedCounts={watchedCounts}
                 />
@@ -1667,7 +1694,8 @@ export default function HomePage() {
                 <MediaSection
                   title="Recently Completed"
                   items={media.filter((item) => item.status === "completed")}
-                  onSelect={(item) => setSelectedId(item.id)}
+                  onSelect={(item) => openMedia(item)}
+                  onDeleteClick={(item) => openMedia(item, true)}
                   onSeeAll={() => navigate("completed")}
                   watchedCounts={watchedCounts}
                 />
@@ -1709,7 +1737,8 @@ export default function HomePage() {
                     key={item.id}
                     item={item}
                     watchedCount={watchedCounts[item.id] ?? 0}
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => openMedia(item)}
+                    onDeleteClick={() => openMedia(item, true)}
                   />
                 ))}
               </div>
@@ -1780,6 +1809,7 @@ export default function HomePage() {
           onClose={() => setSelectedId(null)}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          initialConfirmDelete={deleteOnOpen}
           saving={saving}
           error={saveError}
           watchedEpisodes={watchedEpisodes.filter(
