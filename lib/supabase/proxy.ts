@@ -12,6 +12,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
+
         setAll(cookiesToSet, headers) {
           cookiesToSet.forEach(({ name, value }) => {
             request.cookies.set(name, value);
@@ -39,11 +40,24 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
   const isAuthenticated = !error && !!claims?.sub;
-  const isLoginPage = pathname === "/login";
+
+  // Public pages
+  const publicPages = ["/login", "/welcome"];
+
+  const isPublicPage = publicPages.some(
+    (page) => pathname === page || pathname === `${page}/`,
+  );
+
+  // Public API endpoint for marketing-page access requests
+  const isPublicApiRoute = pathname === "/api/access-requests";
+
+  // Other API routes manage authentication independently
   const isApiRoute = pathname.startsWith("/api/");
 
-  if (!isAuthenticated && !isLoginPage && !isApiRoute) {
+  // Redirect unauthenticated visitors away from protected pages
+  if (!isAuthenticated && !isPublicPage && !isApiRoute && !isPublicApiRoute) {
     const url = request.nextUrl.clone();
+
     url.pathname = "/login";
     url.search = "";
 
@@ -56,8 +70,10 @@ export async function updateSession(request: NextRequest) {
     return redirectResponse;
   }
 
-  if (isAuthenticated && isLoginPage) {
+  // Redirect authenticated users away from the login page
+  if (isAuthenticated && pathname === "/login") {
     const url = request.nextUrl.clone();
+
     url.pathname = "/";
     url.search = "";
 
