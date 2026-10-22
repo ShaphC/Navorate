@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ArrowRight, BookOpen, Check, CheckCircle2, Clock3, Film, Library, Menu, Play, Search, Sparkles, Tv, X, Bell, BookmarkPlus, Clapperboard, Smartphone, ListVideo, CircleCheck } from "lucide-react";
 
@@ -54,12 +54,6 @@ export default function WelcomePage() {
   const [currentYear, setCurrentYear] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [website, setWebsite] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     setCurrentYear(new Date().getFullYear());
@@ -74,32 +68,6 @@ export default function WelcomePage() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
 
-  async function requestAccess(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting) return;
-    setSubmitting(true);
-    setStatus("idle");
-    setMessage("");
-    try {
-      const response = await fetch("/api/access-requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), email: email.trim(), website }),
-      });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(data.error || "Could not send your request.");
-      setStatus("success");
-      setMessage("You're on the list! We'll be in touch about access.");
-      setName("");
-      setEmail("");
-    } catch (error) {
-      setStatus("error");
-      setMessage(error instanceof Error ? error.message : "Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   return (
     <div className={"welcome-page"}>
       <header className={"welcome-header"}>
@@ -111,7 +79,7 @@ export default function WelcomePage() {
             <a href="#how-it-works" onClick={() => setMenuOpen(false)}>How It Works</a>
             <a href="#get-access" onClick={() => setMenuOpen(false)}>Get Access</a>
           </nav>
-          <div className={"welcome-nav-actions"}><a className={"welcome-sign-in"} href={signedIn ? "/dashboard" : "/login"}>{signedIn ? "Dashboard" : "Sign in"}</a><a className={"welcome-nav-cta"} href="#get-access">Request access <ArrowRight size={15}/></a></div>
+          <div className={"welcome-nav-actions"}><a className={"welcome-sign-in"} href={signedIn ? "/dashboard" : "/login"}>{signedIn ? "Dashboard" : "Sign in"}</a><a className={"welcome-nav-cta"} href="/login?mode=request">Request access <ArrowRight size={15}/></a></div>
           <button className={"welcome-menu-button"} aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={23}/> : <Menu size={23}/>}</button>
         </div>
       </header>
@@ -124,7 +92,7 @@ export default function WelcomePage() {
               <span className={"welcome-eyebrow"}><span className={"welcome-eyebrow-dot"}/> FREE EARLY ACCESS</span>
               <h1>Everything you want to watch.<br/><span>Nothing you want to miss.</span></h1>
               <p>Stop wasting time deciding what to watch. Save the movies, shows, anime, and manga you want to enjoy, keep track of your progress, and never lose a recommendation again.</p>
-              <div className={"welcome-hero-actions"}><a className={"welcome-primary-button"} href="#get-access">Request free access <ArrowRight size={18}/></a><a className={"welcome-secondary-button"} href="#how-it-works">See how it works <Play size={16}/></a></div>
+              <div className={"welcome-hero-actions"}><a className={"welcome-primary-button"} href="/login?mode=request">Request free access <ArrowRight size={18}/></a><a className={"welcome-secondary-button"} href="#how-it-works">See how it works <Play size={16}/></a></div>
               <div className={"welcome-hero-foot"}><CheckCircle2 size={16}/> Free to use during early access <span>·</span> No credit card required</div>
             </div>
             <div className={"welcome-preview-wrap"} ref={previewRef} aria-label="Interactive preview of the MyMedia dashboard. Move your mouse to tilt the preview.">
@@ -236,16 +204,16 @@ export default function WelcomePage() {
               <h2>Your library goes <span>wherever you go.</span></h2>
               <p>Remember a recommendation on the go, check your Watch Later list, or update your progress from your phone. Your MyMedia library is right there in your mobile browser.</p>
               <div className="welcome-mobile-benefits"><div><CheckCircle2 size={18}/> Save titles whenever inspiration strikes</div><div><CheckCircle2 size={18}/> Keep your watchlist close at hand</div><div><CheckCircle2 size={18}/> Pick up from any screen</div></div>
-              <a className="welcome-secondary-button" href="#get-access">Request early access <ArrowRight size={17}/></a>
+              <a className="welcome-secondary-button" href="/login?mode=request">Request early access <ArrowRight size={17}/></a>
             </div>
           </div>
         </section>
 
         <section id="how-it-works" className={"welcome-how-section"}><div className={"welcome-section-intro"}><span className={"welcome-kicker"}>SIMPLE BY DESIGN</span><h2>Make room for the good stuff.</h2><p>Three simple steps. No spreadsheets or complicated setup.</p></div><div className={"welcome-steps"}><div><span className={"welcome-step-number"}>01</span><h3>Find a title</h3><p>Search for a movie, show, anime, or manga you've started or want to explore.</p></div><div><span className={"welcome-step-number"}>02</span><h3>Add it to your library</h3><p>Choose where it belongs: Watching, Watch Later, Completed, or On Hold.</p></div><div><span className={"welcome-step-number"}>03</span><h3>Track as you go</h3><p>Update your progress and pick up right where you left off next time.</p></div></div></section>
 
-        <section id="get-access" className={"welcome-access-section"}><div className={"welcome-access-intro"}><span className={"welcome-kicker"}>JOIN THE EARLY ACCESS</span><h2>Your next favorite is waiting.</h2><p>We're opening MyMedia to early users. Request an invite and spend less time searching and more time enjoying.</p></div><div className={"welcome-access-card"}><div className={"welcome-card-top"}><span className={"welcome-access-tag"}>EARLY ACCESS</span><h3>MyMedia Free</h3><p>Everything you need to keep your media organized.</p><div className={"welcome-price"}><strong>$0</strong><span>CAD · currently free</span></div></div><div className={"welcome-card-body"}><div className={"welcome-included"}>WHAT'S INCLUDED</div><ul>{perks.map((perk) => <li key={perk}><Check size={17}/>{perk}</li>)}</ul><form onSubmit={requestAccess} className={"welcome-form"}><label htmlFor="access-name">Your name</label><input id="access-name" autoComplete="name" maxLength={100} required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name"/><label htmlFor="access-email">Email address</label><input id="access-email" type="email" autoComplete="email" maxLength={254} required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"/><div className={"welcome-honeypot"} aria-hidden="true"><label htmlFor="access-website">Website</label><input id="access-website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)}/></div><button className={"welcome-primary-button"} type="submit" disabled={submitting}>{submitting ? "Sending request…" : "Request free access"}<ArrowRight size={18}/></button>{status !== "idle" && <p role="status" className={status === "success" ? "welcome-success" : "welcome-error"}>{message}</p>}</form><p className={"welcome-card-fine-print"}>No payment required. Access is by invitation while we grow.</p></div></div></section>
+        <section id="get-access" className={"welcome-access-section"}><div className={"welcome-access-intro"}><span className={"welcome-kicker"}>JOIN THE EARLY ACCESS</span><h2>Your next favorite is waiting.</h2><p>We're opening MyMedia to early users. Request an invite and spend less time searching and more time enjoying.</p></div><div className={"welcome-access-card"}><div className={"welcome-card-top"}><span className={"welcome-access-tag"}>EARLY ACCESS</span><h3>MyMedia Free</h3><p>Everything you need to keep your media organized.</p><div className={"welcome-price"}><strong>$0</strong><span>CAD · currently free</span></div></div><div className={"welcome-card-body"}><div className={"welcome-included"}>WHAT'S INCLUDED</div><ul>{perks.map((perk) => <li key={perk}><Check size={17}/>{perk}</li>)}</ul><div className={"welcome-form"}><a className="welcome-primary-button" href="/login?mode=request">Request free access <ArrowRight size={18}/></a></div><p className={"welcome-card-fine-print"}>No payment required. Access is by invitation while we grow.</p></div></div></section>
       </main>
-      <footer className={"welcome-footer"}><div><a href="/" className={"welcome-brand"}><span className={"welcome-brand-mark"}><Film size={19}/></span><span>MyMedia</span></a><p>Your stories, your pace, your library.</p></div><div><a href="#features">Features</a><a href="#how-it-works">How It Works</a><a href="#get-access">Get Access</a><a href={signedIn ? "/dashboard" : "/login"}>{signedIn ? "Dashboard" : "Sign in"}</a></div><small>© {currentYear ?? "2026"} MyMedia. All rights reserved.</small><small className="welcome-poster-credit">Poster imagery via TMDB. This product is not endorsed or certified by TMDB.</small></footer>
+      <footer className={"welcome-footer"}><div><a href="/" className={"welcome-brand"}><span className={"welcome-brand-mark"}><Film size={19}/></span><span>MyMedia</span></a><p>Your stories, your pace, your library.</p></div><div><a href="#features">Features</a><a href="#how-it-works">How It Works</a><a href="/login?mode=request">Get Access</a><a href={signedIn ? "/dashboard" : "/login"}>{signedIn ? "Dashboard" : "Sign in"}</a></div><small>© {currentYear ?? "2026"} MyMedia. All rights reserved.</small><small className="welcome-poster-credit">Poster imagery via TMDB. This product is not endorsed or certified by TMDB.</small></footer>
     </div>
   );
 }
